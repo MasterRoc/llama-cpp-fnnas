@@ -3,7 +3,7 @@
 Generate icons for the Fnnos llama.cpp application package.
 
 If a custom source icon is provided by placing a file named
-``ICON_256_new.png`` (or ``ICON_256_new``) in the package directory,
+``ICON_SOURCE.PNG`` (or ``ICON_SOURCE.png``) in the package directory,
 it will be used as the source and resized to all required sizes.
 Otherwise, a programmatically-generated llama-themed icon is used.
 
@@ -26,9 +26,9 @@ PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Candidate names for a user-supplied custom icon (checked in order).
 CUSTOM_SOURCE_NAMES = [
-    "ICON_256_new.png",
-    "ICON_256_new",
-    "ICON_256_new.PNG",
+    "ICON_SOURCE.PNG",
+    "ICON_SOURCE.png",
+    "ICON_SOURCE",
 ]
 
 # Required output icons: (filename, size)
@@ -260,7 +260,7 @@ def main():
 
     # Fall back to programmatic llama icon
     print("No custom icon found. Generating programmatic llama icon.")
-    print("(Place ICON_256_new.png in the package directory to use a custom icon.)")
+    print("(Place ICON_SOURCE.PNG in the package directory to use a custom icon.)")
     print()
 
     # Generate 64x64 icon

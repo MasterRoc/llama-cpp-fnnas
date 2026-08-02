@@ -18,15 +18,17 @@
 ```
 llama-cpp-fnnas/
 ├── manifest              # 应用元数据
-├── ICON.PNG              # 64x64 图标
-├── ICON_256.PNG          # 256x256 图标
+├── ICON_SOURCE.PNG      # 自定义图标源 (256x256) — 支持替换
+├── ICON.PNG              # 64x64 图标 (由 generate_icons.py 自动生成)
+├── ICON_256.PNG          # 256x256 图标 (由 generate_icons.py 自动生成)
 ├── LICENSE               # 开源协议
-├── build.sh              # fnpack 打包脚本
+├── build.sh              # fnpack 打包脚本 (自动生成图标 + 打包)
 ├── build_vulkan.sh       # WSL/Linux Vulkan 编译脚本
+├── generate_icons.py     # 图标生成脚本 (从 ICON_SOURCE.PNG 或程序化生成)
 ├── app/
 │   └── ui/
 │       ├── config         # 应用入口配置 (iframe 弹窗)
-│       └── images/        # UI 图标资源
+│       └── images/        # UI 图标资源 (自动生成)
 ├── cmd/
 │   ├── main               # 主控脚本 (start/stop/status)
 │   ├── install_init       # 安装初始化

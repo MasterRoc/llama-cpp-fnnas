@@ -60,9 +60,9 @@ rm -rf "${OUTPUT_DIR}"
 rm -f "${SCRIPT_DIR}"/*.fpk
 
 # ---- Generate icons ----
-# If ICON_256_new.png exists, always regenerate (use custom icon).
+# If ICON_SOURCE.PNG exists, always regenerate (use custom icon).
 # Otherwise only generate if icons are missing.
-if [ -f "${SCRIPT_DIR}/ICON_256_new.png" ] || [ -f "${SCRIPT_DIR}/ICON_256_new" ] || \
+if [ -f "${SCRIPT_DIR}/ICON_SOURCE.PNG" ] || [ -f "${SCRIPT_DIR}/ICON_SOURCE.png" ] || [ -f "${SCRIPT_DIR}/ICON_SOURCE" ] || \
    [ ! -f "${SCRIPT_DIR}/ICON.PNG" ] || [ ! -f "${SCRIPT_DIR}/ICON_256.PNG" ]; then
     echo "[*] 生成应用图标..."
     python3 "${SCRIPT_DIR}/generate_icons.py"
