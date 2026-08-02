@@ -1,0 +1,13 @@
+{
+  ".url": {
+    "llama-cpp.webui": {
+      "title": "Llama.cpp",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "gatewayPrefix": "/app/llama-cpp",
+      "gatewaySocket": "app.sock",
+      "url": "/app/llama-cpp/",
+      "allUsers": true
+    }
+  }
+}

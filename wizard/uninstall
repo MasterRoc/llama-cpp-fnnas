@@ -1,0 +1,11 @@
+[
+  {
+    "stepTitle": "Uninstall",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "Model files in the shared folder llama-cpp/models are kept after uninstall. To remove them, delete the folder manually in the fnOS file manager."
+      }
+    ]
+  }
+]

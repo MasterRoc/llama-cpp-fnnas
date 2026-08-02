@@ -1,0 +1,25 @@
+[
+  {
+    "stepTitle": "Settings",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "Leave models directory blank to use the shared folder llama-cpp/models. Add -ngl 99 to enable GPU acceleration (requires Vulkan runtime).\n\nGPU acceleration install commands (on NAS, root required):\n  Intel/AMD: sudo apt install libvulkan1 mesa-vulkan-drivers\n  NVIDIA:    sudo apt install libvulkan1 nvidia-driver\n\nCPU-only mode (leave blank) works without any extra dependencies."
+      },
+      {
+        "type": "text",
+        "field": "wizard_models_dir",
+        "label": "Models directory (blank = default share folder)",
+        "initValue": "",
+        "rules": []
+      },
+      {
+        "type": "text",
+        "field": "wizard_server_args",
+        "label": "Extra arguments (e.g. -ngl 99 -c 4096)",
+        "initValue": "",
+        "rules": []
+      }
+    ]
+  }
+]

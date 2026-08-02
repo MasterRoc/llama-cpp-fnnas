@@ -1,0 +1,9 @@
+#!/bin/bash
+echo "[llama-cpp] upgrade_init"
+if [ -f "${TRIM_APPDEST}/cmd/main" ]; then
+    bash "${TRIM_APPDEST}/cmd/main" stop 2>/dev/null || true
+fi
+if [ -f "${TRIM_PKGETC}/server.conf" ]; then
+    cp "${TRIM_PKGETC}/server.conf" "${TRIM_PKGTMP}/server.conf.bak" 2>/dev/null || true
+fi
+exit 0

@@ -1,0 +1,250 @@
+#!/bin/bash
+echo "[llama-cpp] main $1"
+
+APP_DIR="${TRIM_APPDEST}"
+CONF="${TRIM_PKGETC}/server.conf"
+VAR_DIR="${TRIM_PKGVAR}"
+PID_FILE="${VAR_DIR}/llama-server.pid"
+LOG_FILE="${VAR_DIR}/logs/server.log"
+
+# ---- Unified Gateway (统一网关) ----
+# llama-server listens on a Unix Socket; the fnOS gateway forwards
+# /app/llama-cpp/* -> ${APP_DIR}/app.sock after validating the NAS login.
+# Public access goes through the system's already-open 443 port, so no
+# firewall change is needed. See:
+# https://developer.fnnas.com/docs/core-concepts/gateway-registration
+GATEWAY_PREFIX="/app/llama-cpp"
+SOCK_PATH="${APP_DIR}/app.sock"
+
+# default models directory: the data-share declared in config/resource
+# (share name "llama-cpp/models"). fnOS lands data-share on the same volume as
+# the app, at /vol{n}/@appshare/{appname}/<share-leaf>. Derive it from
+# TRIM_APPDEST (/vol{n}/@appcenter/{appname}) by swapping @appcenter -> @appshare.
+SHARE_MODELS_DIR="${TRIM_APPDEST/@appcenter/@appshare}/models"
+[ -d "${SHARE_MODELS_DIR}" ] || SHARE_MODELS_DIR="/vol1/@appshare/${TRIM_APPNAME}/models"
+
+# detect arch and set bin dir
+ARCH=$(uname -m)
+case "${ARCH}" in
+    x86_64)  BIN_DIR="${APP_DIR}/bin/x64" ;;
+    aarch64) BIN_DIR="${APP_DIR}/bin/arm64" ;;
+    armv7l)
+        echo "[llama-cpp] unsupported arch ${ARCH} (32-bit ARM not available)" >&2
+        echo "armv7l 设备暂不支持，仅提供 x86_64 和 aarch64 二进制。" > "${TRIM_TEMP_LOGFILE:-/dev/null}"
+        exit 1
+        ;;
+    armv8l)  BIN_DIR="${APP_DIR}/bin/arm64" ;;
+    *)       BIN_DIR="${APP_DIR}/bin/x64" ;;
+esac
+
+SERVER="${BIN_DIR}/llama-server"
+WEBUI_DIR="${APP_DIR}/webui"
+
+echo "[llama-cpp] arch=${ARCH} bin=${BIN_DIR}"
+
+# load config (no service port in gateway mode; access is via /app/llama-cpp)
+MODELS_DIR="${SHARE_MODELS_DIR}"
+SERVER_ARGS=""
+if [ -f "${CONF}" ]; then
+    MODELS_DIR=$(grep -E '^MODELS_DIR=' "${CONF}" 2>/dev/null | head -1 | cut -d= -f2-)
+    SERVER_ARGS=$(grep -E '^SERVER_ARGS=' "${CONF}" 2>/dev/null | head -1 | cut -d= -f2-)
+fi
+MODELS_DIR="${MODELS_DIR:-${SHARE_MODELS_DIR}}"
+SERVER_ARGS="${SERVER_ARGS:-}"
+
+# ---- Vulkan GPU detection ----
+# GPU group membership (video/render) is granted by config/privilege join-groups,
+# so the device is normally readable out of the box. Detection here is only for
+# diagnostics in the startup log.
+HAS_VULKAN=false
+if [ -f "${BIN_DIR}/ggml-vulkan.so" ]; then
+    HAS_VULKAN=true
+fi
+
+GPU_ACCESSIBLE=false
+if $HAS_VULKAN; then
+    if [ -c /dev/dri/renderD128 ] && [ -r /dev/dri/renderD128 ]; then
+        GPU_ACCESSIBLE=true
+    elif [ -c /dev/dri/renderD129 ] && [ -r /dev/dri/renderD129 ]; then
+        GPU_ACCESSIBLE=true
+    elif ls /dev/dri/render* >/dev/null 2>&1; then
+        echo "[llama-cpp] WARNING: GPU devices found but not readable. Check join-groups / config/privilege."
+    fi
+    if [ -c /dev/nvidia0 ] && [ -r /dev/nvidia0 ]; then
+        GPU_ACCESSIBLE=true
+    fi
+fi
+
+is_running() {
+    if [ -f "${PID_FILE}" ]; then
+        pid=$(cat "${PID_FILE}" 2>/dev/null)
+        if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+do_start() {
+    echo "[llama-cpp] starting server..."
+
+    if [ ! -f "${SERVER}" ]; then
+        echo "[llama-cpp] ERROR: ${SERVER} not found" >&2
+        echo "[llama-cpp] ERROR: ${SERVER} not found" >"${TRIM_TEMP_LOGFILE:-/dev/null}" 2>/dev/null
+        exit 1
+    fi
+
+    chmod +x "${SERVER}" 2>/dev/null || true
+
+    if is_running; then
+        echo "[llama-cpp] already running"
+        exit 0
+    fi
+
+    mkdir -p "${VAR_DIR}/logs" 2>/dev/null || true
+    mkdir -p "${MODELS_DIR}" 2>/dev/null || true
+
+    # clean up stale socket from a previous run
+    rm -f "${SOCK_PATH}" 2>/dev/null || true
+
+    # listen on a Unix Socket (host ending with .sock triggers AF_UNIX mode),
+    # and serve everything under the gateway prefix so paths match what the
+    # fnOS gateway forwards (/app/llama-cpp/...).
+    ARGS="--host ${SOCK_PATH} --api-prefix ${GATEWAY_PREFIX}"
+
+    if [ -d "${WEBUI_DIR}" ] && [ -f "${WEBUI_DIR}/index.html" ]; then
+        ARGS="${ARGS} --path ${WEBUI_DIR}"
+    fi
+
+    # Hand the whole models directory to llama-server. Using --models-dir instead
+    # of a single --model lets the UI list every .gguf in the folder and supports
+    # multiple models / on-demand loading. The directory is scanned at startup,
+    # so newly added models need a service restart to appear.
+    if [ -d "${MODELS_DIR}" ]; then
+        ARGS="${ARGS} --models-dir ${MODELS_DIR}"
+        NMODELS=$(find "${MODELS_DIR}" -maxdepth 3 -type f -name "*.gguf" 2>/dev/null | wc -l)
+        echo "[llama-cpp] models-dir=${MODELS_DIR} (${NMODELS} gguf file(s) found)"
+        if [ "${NMODELS}" -eq 0 ]; then
+            echo "[llama-cpp] WARNING: no .gguf in ${MODELS_DIR}; UI will show an empty model list."
+            echo "[llama-cpp] Drop GGUF models there (file manager: share/llama-cpp/models) and restart."
+        fi
+    else
+        echo "[llama-cpp] WARNING: models dir ${MODELS_DIR} does not exist; serving without models."
+    fi
+
+    if [ -n "${SERVER_ARGS}" ]; then
+        ARGS="${ARGS} ${SERVER_ARGS}"
+    fi
+
+    export LD_LIBRARY_PATH="${BIN_DIR}:${LD_LIBRARY_PATH}"
+
+    echo "[llama-cpp] cmd: ${SERVER} ${ARGS}"
+    nohup "${SERVER}" ${ARGS} >> "${LOG_FILE}" 2>&1 &
+    pid=$!
+    echo "${pid}" > "${PID_FILE}"
+    echo "[llama-cpp] pid=${pid}"
+
+    # the fnOS gateway connects to the socket; make sure it is connectable
+    # for the gateway process (runs as a different user than the app).
+    # Use 660 + group access instead of world-writable 666 for security.
+    # The gateway typically runs in the same group or as root.
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        [ -S "${SOCK_PATH}" ] && break
+        sleep 0.3
+    done
+    if [ -S "${SOCK_PATH}" ]; then
+        chmod 660 "${SOCK_PATH}" 2>/dev/null || true
+        # If the gateway process runs as a different user/group and can't
+        # read the socket, fall back to 666 so the request can be forwarded.
+        # This only happens if group-based access fails.
+        if [ ! -r "${SOCK_PATH}" ]; then
+            chmod 666 "${SOCK_PATH}" 2>/dev/null || true
+        fi
+        echo "[llama-cpp] socket ready: ${SOCK_PATH}"
+    else
+        echo "[llama-cpp] WARNING: socket ${SOCK_PATH} not created within 3s" >&2
+    fi
+
+    if $HAS_VULKAN && ! echo "${SERVER_ARGS}" | grep -q -- "-ngl"; then
+        if $GPU_ACCESSIBLE; then
+            echo "[llama-cpp] GPU ready. Add '-ngl 99' to Extra Args to enable GPU acceleration."
+        else
+            echo "[llama-cpp] Vulkan lib found but GPU device NOT accessible. Check:"
+            echo "  - Is GPU driver installed? (apt install mesa-vulkan-drivers)"
+            echo "  - Does /dev/dri/render* exist and is readable?"
+            echo "  - user: ${TRIM_USERNAME:-$(whoami)}  groups: $(groups 2>/dev/null)"
+            echo "[llama-cpp] App will continue with CPU-only mode."
+        fi
+    else
+        echo "[llama-cpp] Running in CPU-only mode (no -ngl flag). This is fine for most use cases."
+    fi
+
+    # Poll for startup readiness: check if process is still alive,
+    # giving llama-server time to initialize and bind the socket.
+    startup_ok=false
+    for i in $(seq 1 10); do
+        if ! kill -0 "${pid}" 2>/dev/null; then
+            break
+        fi
+        if [ -S "${SOCK_PATH}" ]; then
+            startup_ok=true
+            break
+        fi
+        sleep 0.5
+    done
+
+    if ! kill -0 "${pid}" 2>/dev/null; then
+        echo "[llama-cpp] ERROR: process died" >&2
+        echo "[llama-cpp] log:" >&2
+        tail -n 50 "${LOG_FILE}" 2>/dev/null >&2
+        rm -f "${PID_FILE}"
+        exit 1
+    fi
+
+    echo "[llama-cpp] started, gateway=${GATEWAY_PREFIX} socket=${SOCK_PATH}"
+}
+
+do_stop() {
+    echo "[llama-cpp] stopping..."
+    if [ -f "${PID_FILE}" ]; then
+        pid=$(cat "${PID_FILE}" 2>/dev/null)
+        if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+            kill -TERM "${pid}" 2>/dev/null
+            # graceful shutdown: wait up to 10s, then force-kill
+            local count=0
+            while kill -0 "${pid}" 2>/dev/null && [ $count -lt 10 ]; do
+                sleep 1
+                count=$((count + 1))
+            done
+            if kill -0 "${pid}" 2>/dev/null; then
+                kill -KILL "${pid}" 2>/dev/null
+            fi
+        fi
+        rm -f "${PID_FILE}"
+    fi
+    rm -f "${SOCK_PATH}" 2>/dev/null || true
+    echo "[llama-cpp] stopped"
+    exit 0
+}
+
+do_status() {
+    if is_running; then
+        GPU_INFO=""
+        if $HAS_VULKAN; then
+            GPU_INFO=", vulkan=available"
+        fi
+        echo "[llama-cpp] running, gateway=${GATEWAY_PREFIX}${GPU_INFO}"
+        exit 0
+    else
+        echo "[llama-cpp] not running"
+        exit 3
+    fi
+}
+
+case "$1" in
+    start)   do_start ;;
+    stop)    do_stop ;;
+    status)  do_status ;;
+    restart) do_stop; sleep 2; do_start ;;
+    *)       exit 1 ;;
+esac

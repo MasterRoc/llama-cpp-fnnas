@@ -1,0 +1,15 @@
+appname=llama-cpp
+version=1.1.0
+display_name=Llama.cpp
+desc=Local LLM inference server based on llama.cpp with Vulkan GPU acceleration. Supports GGUF models, OpenAI-compatible API, and built-in Web chat UI.
+source=thirdparty
+platform=all
+maintainer=JeryZong
+maintainer_url=https://github.com/yhirose/fnllama-llama-cpp
+distributor=JeryZong
+os_min_version=1.2.0
+desktop_uidir=ui
+desktop_applaunchname=llama-cpp.webui
+ctl_stop=true
+checkport=false
+changelog=使用 config/privilege 的 join-groups 由框架自动管理 GPU 组权限；模型目录改用 data-share 共享目录，可在文件管理器中直接管理。

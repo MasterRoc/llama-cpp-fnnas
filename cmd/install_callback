@@ -1,0 +1,161 @@
+#!/bin/bash
+echo "[llama-cpp] install_callback start"
+
+APP_DIR="${TRIM_APPDEST}"
+echo "[llama-cpp] APP_DIR=${APP_DIR}"
+
+ARCH=$(uname -m)
+case "${ARCH}" in
+    x86_64)  PKG_ARCH="x64" ;;
+    aarch64) PKG_ARCH="arm64" ;;
+    armv7l)
+        echo "[llama-cpp] unsupported arch ${ARCH} (32-bit ARM not available)" >&2
+        echo "armv7l 设备暂不支持。仅提供 x86_64 和 aarch64 二进制。" > "${TRIM_TEMP_LOGFILE:-/dev/null}"
+        exit 1
+        ;;
+    armv8l)  PKG_ARCH="arm64" ;;
+    *) echo "[llama-cpp] bad arch ${ARCH}" >&2; exit 1 ;;
+esac
+echo "[llama-cpp] arch=${ARCH} pkg=${PKG_ARCH}"
+
+SRC="${APP_DIR}/bin/${PKG_ARCH}"
+echo "[llama-cpp] checking ${SRC}"
+ls -la "${SRC}/" 2>/dev/null | head -5
+
+if [ ! -d "${SRC}" ]; then
+    echo "[llama-cpp] missing bin/${PKG_ARCH}" >&2
+    exit 1
+fi
+
+# rebuild .so symlinks
+cd "${SRC}" || exit 1
+for sofile in *.so.*.*.* *.so.*.*; do
+    [ -f "$sofile" ] || continue
+    base=$(echo "$sofile" | sed 's/\.so\..*$/.so/')
+    soname=$(echo "$sofile" | sed -n 's/^.*\.so\(\.[0-9]\+\).*$/\1/p')
+    if [ -n "$soname" ]; then
+        link_name="${base}${soname}"
+        [ ! -e "$link_name" ] && [ ! -L "$link_name" ] && ln -sf "$sofile" "$link_name"
+    fi
+    if [ ! -e "$base" ] && [ ! -L "$base" ]; then
+        if [ -n "$soname" ]; then
+            ln -sf "${base}${soname}" "$base"
+        else
+            ln -sf "$sofile" "$base"
+        fi
+    fi
+done
+chmod +x llama-server llama-cli 2>/dev/null || true
+echo "[llama-cpp] .so links done"
+ls -la llama-server libllama* 2>/dev/null
+
+# remove unused arch
+for a in x64 arm64; do
+    if [ "$a" != "$PKG_ARCH" ]; then
+        rm -rf "${APP_DIR}/bin/${a}" 2>/dev/null || true
+        echo "[llama-cpp] removed bin/${a}"
+    fi
+done
+
+# GPU 组（video/render）由 config/privilege 的 join-groups 声明，
+# 飞牛框架在安装时以 root 自动加入应用用户，无需在此手动 usermod
+# （callback 以非 root 的包用户运行，usermod 本就会失败）。
+
+# ---- 检测系统 Vulkan 运行时 ----
+# Vulkan 驱动是系统级组件，不能通过应用包自动安装。
+# 我们在安装时检测是否已安装，若缺失则向用户提示。
+# 即使没有 Vulkan，llama-server 仍可通过 CPU 模式运行，仅无法使用 GPU 加速。
+HAS_VULKAN_SYSTEM=false
+VULKAN_LIB=""
+for libdir in \
+    /usr/lib/x86_64-linux-gnu \
+    /usr/lib/aarch64-linux-gnu \
+    /usr/lib \
+    /usr/lib64 \
+    /lib/x86_64-linux-gnu \
+    /lib/aarch64-linux-gnu \
+    /lib \
+    /lib64; do
+    if [ -f "${libdir}/libvulkan.so.1" ] || [ -L "${libdir}/libvulkan.so.1" ]; then
+        HAS_VULKAN_SYSTEM=true
+        VULKAN_LIB="${libdir}/libvulkan.so.1"
+        break
+    fi
+done
+
+HAS_VULKAN_ICD=false
+if ldconfig -p 2>/dev/null | grep -q 'libvulkan_'; then
+    HAS_VULKAN_ICD=true
+fi
+
+HAS_GPU_DEVICE=false
+if [ -c /dev/dri/renderD128 ] 2>/dev/null; then
+    HAS_GPU_DEVICE=true
+elif [ -c /dev/nvidia0 ] 2>/dev/null; then
+    HAS_GPU_DEVICE=true
+fi
+
+# ---- 检测 GPU 驱动（Vulkan ICD）是否安装 ----
+# check if any vulkan ICD package is installed
+check_vulkan_icd() {
+    if [ -f /usr/share/vulkan/icd.d/intel_icd.x86_64.json ] 2>/dev/null || \
+       [ -f /usr/share/vulkan/icd.d/radeon_icd.x86_64.json ] 2>/dev/null || \
+       [ -f /usr/share/vulkan/icd.d/nvidia_icd.x86_64.json ] 2>/dev/null || \
+       [ -f /usr/share/vulkan/icd.d/intel_icd.aarch64.json ] 2>/dev/null || \
+       [ -f /usr/share/vulkan/icd.d/radeon_icd.aarch64.json ] 2>/dev/null || \
+       [ -f /usr/share/vulkan/icd.d/nvidia_icd.aarch64.json ] 2>/dev/null; then
+        return 0
+    fi
+    if dpkg -l 2>/dev/null | grep -q 'vulkan'; then
+        return 0
+    fi
+    return 1
+}
+
+# Write user-visible diagnostics to TRIM_TEMP_LOGFILE.
+# This message appears in the Fnnos app center during installation.
+# Even without Vulkan, the app will still start and work via CPU.
+if $HAS_VULKAN_SYSTEM; then
+    if $HAS_VULKAN_ICD; then
+        echo "[llama-cpp] Vulkan 运行时已安装，GPU 加速可用。" >> "${TRIM_TEMP_LOGFILE:-/dev/null}"
+    else
+        echo "[llama-cpp] Vulkan 加载库已安装，但未检测到 GPU 驱动 (ICD)。GPU 加速不可用。" >> "${TRIM_TEMP_LOGFILE:-/dev/null}"
+        echo "如需 GPU 加速，请在飞牛设备上执行:" >> "${TRIM_TEMP_LOGFILE:-/dev/null}"
+        echo "  # Intel/AMD GPU: sudo apt install mesa-vulkan-drivers" >> "${TRIM_TEMP_LOGFILE:-/dev/null}"
+        echo "  # NVIDIA GPU:    sudo apt install nvidia-driver nvidia-vulkan-icd" >> "${TRIM_TEMP_LOGFILE:-/dev/null}"
+        echo "安装完成后重启应用即可。" >> "${TRIM_TEMP_LOGFILE:-/dev/null}"
+    fi
+else
+    echo "[llama-cpp] 系统未安装 Vulkan 运行时。GPU 加速不可用，应用将以 CPU 模式运行。" >> "${TRIM_TEMP_LOGFILE:-/dev/null}"
+    echo "如需 GPU 加速，请在飞牛设备上执行:" >> "${TRIM_TEMP_LOGFILE:-/dev/null}"
+    echo "  # Intel/AMD GPU: sudo apt install -y libvulkan1 mesa-vulkan-drivers" >> "${TRIM_TEMP_LOGFILE:-/dev/null}"
+    echo "  # NVIDIA GPU:    sudo apt install -y libvulkan1 nvidia-driver nvidia-vulkan-icd" >> "${TRIM_TEMP_LOGFILE:-/dev/null}"
+    echo "安装完成后重启应用即可。" >> "${TRIM_TEMP_LOGFILE:-/dev/null}"
+fi
+
+if ! $HAS_GPU_DEVICE; then
+    echo "[llama-cpp] 未检测到 GPU 设备 (/dev/dri/render* 或 /dev/nvidia0)。" >> "${TRIM_TEMP_LOGFILE:-/dev/null}"
+    echo "若设备有显卡，请确认硬件驱动已加载。" >> "${TRIM_TEMP_LOGFILE:-/dev/null}"
+fi
+
+echo "[llama-cpp] Vulkan: system=${HAS_VULKAN_SYSTEM} icd=$(dpkg -l 2>/dev/null | grep -c vulkan || echo 0) gpu_device=${HAS_GPU_DEVICE}"
+
+# config
+mkdir -p "${TRIM_PKGETC}" 2>/dev/null || true
+mkdir -p "${TRIM_PKGVAR}/logs" 2>/dev/null || true
+# the models share directory is created by fnOS from config/resource (data-share),
+# reachable at /var/apps/{appname}/share/models; only create it as a fallback.
+mkdir -p "${APP_DIR%/target}/share/models" 2>/dev/null || true
+
+cat > "${TRIM_PKGETC}/server.conf" << EOF
+MODELS_DIR=${wizard_models_dir:-}
+SERVER_ARGS=${wizard_server_args:-}
+PKG_ARCH=${PKG_ARCH}
+EOF
+echo "[llama-cpp] config written"
+
+# start
+echo "[llama-cpp] calling main start..."
+bash "${APP_DIR}/cmd/main" start 2>&1 || true
+echo "[llama-cpp] install_callback done"
+exit 0

@@ -1,0 +1,34 @@
+[
+  {
+    "stepTitle": "Models",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "Models are read from the shared folder llama-cpp/models by default. Upload your .gguf files there via the fnOS file manager. You can also specify a custom directory below."
+      },
+      {
+        "type": "text",
+        "field": "wizard_models_dir",
+        "label": "Models directory (leave blank for default share folder)",
+        "initValue": "",
+        "rules": []
+      }
+    ]
+  },
+  {
+    "stepTitle": "Advanced",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "Add -ngl 99 to offload all layers to the GPU. GPU acceleration requires the Vulkan runtime to be installed on the NAS device. If Vulkan is not available, the app will automatically fall back to CPU mode.\n\nTo enable GPU acceleration, run on your NAS (requires root):\n  Intel/AMD GPU: sudo apt install -y libvulkan1 mesa-vulkan-drivers\n  NVIDIA GPU:   sudo apt install -y libvulkan1 nvidia-driver\n\nOther common flags: -c 4096 (context size), -t 8 (CPU threads). Leave blank for CPU-only mode."
+      },
+      {
+        "type": "text",
+        "field": "wizard_server_args",
+        "label": "Extra arguments (e.g. -ngl 99 -c 4096)",
+        "initValue": "-ngl 99",
+        "rules": []
+      }
+    ]
+  }
+]

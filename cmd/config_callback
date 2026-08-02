@@ -1,0 +1,21 @@
+#!/bin/bash
+echo "[llama-cpp] config_callback"
+
+# Unified Gateway mode: access is via /app/llama-cpp on the system domain,
+# so there is no service port to configure. We still persist wizard values
+# for models dir / extra args.
+
+if [ -n "${wizard_models_dir}" ]; then
+    sed -i "s|^MODELS_DIR=.*|MODELS_DIR=${wizard_models_dir}|" "${TRIM_PKGETC}/server.conf" 2>/dev/null || true
+fi
+if [ -n "${wizard_server_args}" ]; then
+    sed -i "s|^SERVER_ARGS=.*|SERVER_ARGS=${wizard_server_args}|" "${TRIM_PKGETC}/server.conf" 2>/dev/null || true
+fi
+
+# restart so changes take effect
+if [ -f "${TRIM_APPDEST}/cmd/main" ]; then
+    bash "${TRIM_APPDEST}/cmd/main" restart 2>/dev/null || true
+fi
+
+echo "[llama-cpp] config_callback done"
+exit 0

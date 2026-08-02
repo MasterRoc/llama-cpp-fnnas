@@ -1,0 +1,6 @@
+#!/bin/bash
+echo "[llama-cpp] uninstall_init"
+if [ -f "${TRIM_APPDEST}/cmd/main" ]; then
+    bash "${TRIM_APPDEST}/cmd/main" stop 2>/dev/null || true
+fi
+exit 0

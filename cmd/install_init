@@ -1,0 +1,18 @@
+#!/bin/bash
+echo "[llama-cpp] install_init"
+ARCH=$(uname -m)
+case "${ARCH}" in
+    x86_64|aarch64|armv8l)
+        echo "[llama-cpp] arch ${ARCH} ok"
+        ;;
+    armv7l)
+        echo "[llama-cpp] unsupported arch ${ARCH} (32-bit ARM)" >&2
+        echo "armv7l 设备暂不支持，仅提供 x86_64 和 aarch64 二进制。" > "${TRIM_TEMP_LOGFILE:-/dev/null}"
+        exit 1
+        ;;
+    *)
+        echo "[llama-cpp] unsupported arch ${ARCH}" >&2
+        exit 1
+        ;;
+esac
+exit 0

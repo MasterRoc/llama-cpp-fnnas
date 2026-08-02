@@ -1,0 +1,17 @@
+#!/bin/bash
+echo "[llama-cpp] upgrade_callback"
+# restore saved models dir / extra args across upgrade (port is irrelevant in gateway mode)
+if [ -f "${TRIM_PKGTMP}/server.conf.bak" ]; then
+    if [ -f "${TRIM_PKGETC}/server.conf" ]; then
+        for key in MODELS_DIR SERVER_ARGS; do
+            val=$(grep -E "^${key}=" "${TRIM_PKGTMP}/server.conf.bak" 2>/dev/null | head -1 | cut -d= -f2-)
+            [ -n "${val}" ] && sed -i "s|^${key}=.*|${key}=${val}|" "${TRIM_PKGETC}/server.conf" 2>/dev/null || true
+        done
+    fi
+    rm -f "${TRIM_PKGTMP}/server.conf.bak"
+    echo "[llama-cpp] config restored"
+fi
+if [ -f "${TRIM_APPDEST}/cmd/main" ]; then
+    bash "${TRIM_APPDEST}/cmd/main" start 2>/dev/null || true
+fi
+exit 0

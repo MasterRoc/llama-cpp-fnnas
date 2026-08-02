@@ -1,0 +1,20 @@
+#!/bin/bash
+echo "[llama-cpp] uninstall_callback"
+
+APP_DIR="${TRIM_APPDEST}"
+
+# GPU 组（video/render）由 config/privilege 的 join-groups 声明，框架安装时自动加。
+# 实测：框架卸载时不会自动移除这些组，应用用户与组关系会残留——同 Bark 等第三方应用，
+# 属 fnOS 常态，无害（用户无进程在跑，组权限无处施展），且下次重装会复用。
+# callback 以非 root 包用户运行，gpasswd -d 本就必失败，故此处不尝试清理。
+
+# ---- 数据清理 ----
+# 模型文件存于 data-share 共享目录（/vol{n}/@appshare/llama-cpp/models），
+# 由飞牛框架托管（父目录 root:000，callback 非 root 无法删除）。
+# 因此卸载始终保留模型，用户如需删除请在飞牛文件管理器手动清理 share/llama-cpp/models。
+# 这里只清理应用私有数据：日志、PID 等。
+rm -rf "${TRIM_PKGVAR}/logs" 2>/dev/null || true
+rm -f "${TRIM_PKGVAR}/llama-server.pid" 2>/dev/null || true
+echo "[llama-cpp] app runtime data cleared; model files kept in shared folder"
+echo "[llama-cpp] uninstall_callback done"
+exit 0
