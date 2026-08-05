@@ -15,24 +15,29 @@
 
 ## 目录结构
 
+> **注意**：Git 仓库只包含源码和配置。`app/bin/`、`app/webui/` 和 `fnpack` 需要另外下载，见下方快速开始说明。
+
 ```
 llama-cpp-fnnas/
 ├── manifest              # 应用元数据
-├── ICON_SOURCE.PNG      # 自定义图标源 (256x256) — 支持替换
+├── ICON_SOURCE.PNG       # 自定义图标源 (256x256) — 支持替换
 ├── ICON.PNG              # 64x64 图标 (由 generate_icons.py 自动生成)
 ├── ICON_256.PNG          # 256x256 图标 (由 generate_icons.py 自动生成)
 ├── LICENSE               # 开源协议
+├── prepare.sh            # 依赖下载脚本 (拉代码后先跑这个)
 ├── build.sh              # fnpack 打包脚本 (自动生成图标 + 打包)
 ├── build_vulkan.sh       # WSL/Linux Vulkan 编译脚本
 ├── generate_icons.py     # 图标生成脚本 (从 ICON_SOURCE.PNG 或程序化生成)
 ├── app/
+│   ├── bin/              # [需下载] llama.cpp 二进制 (x64 + arm64)
+│   ├── webui/            # [需下载] llama.cpp Web 聊天界面
 │   └── ui/
 │       ├── config         # 应用入口配置 (iframe 弹窗)
 │       └── images/        # UI 图标资源 (自动生成)
 ├── cmd/
 │   ├── main               # 主控脚本 (start/stop/status)
 │   ├── install_init       # 安装初始化
-│   ├── install_callback   # 安装回调 (下载二进制)
+│   ├── install_callback   # 安装回调
 │   ├── uninstall_init     # 卸载初始化
 │   ├── uninstall_callback # 卸载回调
 │   ├── upgrade_init       # 升级初始化
@@ -49,6 +54,21 @@ llama-cpp-fnnas/
 ```
 
 ## 快速开始
+
+### 前置准备：下载依赖（仅首次）
+
+> 从 GitHub 拉下来的代码只包含源码和配置，缺少二进制和 WebUI。运行 `prepare.sh` 自动下载。
+
+```bash
+# 首次克隆后执行一次即可
+chmod +x prepare.sh
+./prepare.sh
+```
+
+该脚本会自动下载：
+- **fnpack** — 飞牛官方打包工具
+- **llama.cpp 二进制** — 预编译的 Vulkan 推理引擎 (x64 + arm64)
+- **WebUI** — llama.cpp 内置聊天界面
 
 ### 方式一：在 fnOS 上直接打包
 

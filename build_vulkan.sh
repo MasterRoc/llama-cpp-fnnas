@@ -143,19 +143,19 @@ echo "[5/5] 复制二进制文件到打包目录..."
 
 mkdir -p "${TARGET_DIR}"
 
-# 复制所有 .so 文件（包括 ggml-vulkan.so）
+# 复制所有 .so 文件（包括 libggml-vulkan.so）
 echo "复制共享库 (.so)..."
 find bin -maxdepth 1 -name "*.so*" -type f | while read -r f; do
     cp -v "$f" "${TARGET_DIR}/" 2>/dev/null || true
 done
 
-# 如果 ggml-vulkan.so 不在 bin/ 下，尝试在 lib/ 或其他位置查找
-if [ ! -f "bin/ggml-vulkan.so" ]; then
-    VULKAN_SO=$(find . -name "ggml-vulkan.so" -type f 2>/dev/null | head -1)
+# 如果 libggml-vulkan.so 不在 bin/ 下，尝试在 lib/ 或其他位置查找
+if [ ! -f "bin/libggml-vulkan.so" ]; then
+    VULKAN_SO=$(find . -name "libggml-vulkan.so" -type f 2>/dev/null | head -1)
     if [ -n "${VULKAN_SO}" ]; then
         cp -v "${VULKAN_SO}" "${TARGET_DIR}/"
     else
-        echo "[警告] 找不到 ggml-vulkan.so，请确认 Vulkan 编译是否成功"
+        echo "[警告] 找不到 libggml-vulkan.so，请确认 Vulkan 编译是否成功"
     fi
 fi
 
@@ -192,7 +192,7 @@ echo "llama.cpp commit: ${LLAMA_COMMIT}"
 echo "目标目录: ${TARGET_DIR}"
 echo ""
 echo "Vulkan 相关文件:"
-ls -lh "${TARGET_DIR}/ggml-vulkan.so" 2>/dev/null || echo "  [警告] ggml-vulkan.so 未找到!"
+ls -lh "${TARGET_DIR}/libggml-vulkan.so" 2>/dev/null || echo "  [警告] libggml-vulkan.so 未找到!"
 echo ""
 echo "关键二进制:"
 ls -lh "${TARGET_DIR}/llama-server" "${TARGET_DIR}/libggml.so"* "${TARGET_DIR}/libllama.so"* 2>/dev/null || true

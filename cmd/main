@@ -57,7 +57,7 @@ SERVER_ARGS="${SERVER_ARGS:-}"
 # so the device is normally readable out of the box. Detection here is only for
 # diagnostics in the startup log.
 HAS_VULKAN=false
-if [ -f "${BIN_DIR}/ggml-vulkan.so" ]; then
+if [ -f "${BIN_DIR}/libggml-vulkan.so" ]; then
     HAS_VULKAN=true
 fi
 
