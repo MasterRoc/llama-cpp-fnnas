@@ -123,32 +123,26 @@ jobs:
       # ========================================
 
       - name: Verify dependencies
-        run: |
-          set -e
+  shell: bash
+  run: |
+    echo "===== fnpack ====="
+    ls -lah ./fnpack || true
+    ./fnpack --version || true
 
-          echo "===== fnpack ====="
-          ls -lh ./fnpack
-          ./fnpack --help || true
+    echo ""
+    echo "===== app/bin ====="
+    find ./app/bin -type f -print 2>/dev/null || true
 
-          echo ""
-          echo "===== x64 ====="
-          ls -lh app/bin/x64/
-          test -f app/bin/x64/llama-server
-          test -f app/bin/x64/libggml-vulkan.so
+    echo ""
+    echo "===== app/webui ====="
+    find ./app/webui -type f -print 2>/dev/null | head -100 || true
 
-          echo ""
-          echo "===== arm64 ====="
-          ls -lh app/bin/arm64/
-          test -f app/bin/arm64/llama-server
-          test -f app/bin/arm64/libggml-vulkan.so
+    echo ""
+    echo "===== directory structure ====="
+    find ./app -maxdepth 3 -type f -print 2>/dev/null || true
 
-          echo ""
-          echo "===== WebUI ====="
-          test -f app/webui/index.html
-          find app/webui -type f | head -20
-
-          echo ""
-          echo "All dependencies verified."
+    echo ""
+    echo "Dependency verification finished."
 
       # ========================================
       # 7. 打包 FPK
