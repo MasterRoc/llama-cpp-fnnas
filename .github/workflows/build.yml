@@ -7,7 +7,7 @@ on:
       llama_cpp_ver:
         description: "llama.cpp release version"
         required: true
-        default: "b10276"
+        default: "b10612"
 
       fnpack_ver:
         description: "fnpack version"
