@@ -83,7 +83,7 @@ if [ -f "${SCRIPT_DIR}/app/webui/index.html" ]; then
 else
     echo "[3/3] Downloading WebUI..."
     mkdir -p "${SCRIPT_DIR}/app/webui"
-    local tmp="/tmp/llama-ui.tar.gz"
+    tmp="/tmp/llama-ui.tar.gz"
     curl -L --connect-timeout 30 -o "${tmp}" "${RELEASE_URL}/llama-${LLAMA_CPP_VER}-ui.tar.gz"
     tar xzf "${tmp}" --strip-components=1 -C "${SCRIPT_DIR}/app/webui/" 2>/dev/null || true
     rm -f "${tmp}"
