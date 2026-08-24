@@ -1,100 +1,279 @@
-#!/bin/bash
-# ============================================================
-# llama.cpp for fnOS - Prepare Script
-# Downloads all external dependencies needed for packaging.
-#
-# Git repo 只包含源码，以下组件需要从外部下载：
-#   1. fnpack          — 飞牛官方打包工具
-#   2. llama.cpp 二进制 — 预编译的 Vulkan 推理引擎
-#   3. WebUI           — llama.cpp 内置聊天界面
-# ============================================================
+#!/usr/bin/env bash
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LLAMA_CPP_VER="${LLAMA_CPP_VER:-b10276}"
+# ============================================================
+# llama-cpp-fnnas dependency prepare script
+#
+# LLAMA_CPP_VER 由 GitHub Actions build.yml 提供
+# 不再在这里写死 llama.cpp 版本
+# ============================================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}"
+
+# ============================================================
+# Check llama.cpp version
+# ============================================================
+
+if [ -z "${LLAMA_CPP_VER:-}" ]; then
+    echo "============================================================"
+    echo "ERROR: LLAMA_CPP_VER is not set."
+    echo ""
+    echo "Please provide LLAMA_CPP_VER from GitHub Actions."
+    echo ""
+    echo "Example:"
+    echo "  LLAMA_CPP_VER=b10612 ./prepare.sh"
+    echo "============================================================"
+    exit 1
+fi
+
+echo "============================================================"
+echo "Preparing llama.cpp dependencies"
+echo "llama.cpp version: ${LLAMA_CPP_VER}"
+echo "============================================================"
+
+# ============================================================
+# fnpack version
+# ============================================================
+
 FNPACK_VER="${FNPACK_VER:-1.2.3}"
 
-echo "========================================"
-echo "  Llama.cpp - 依赖下载"
-echo "========================================"
+echo ""
+echo "fnpack version: ${FNPACK_VER}"
+
+# ============================================================
+# Directories
+# ============================================================
+
+mkdir -p app/bin/x64
+mkdir -p app/bin/arm64
+mkdir -p app/webui
+
+# ============================================================
+# llama.cpp release URL
+# ============================================================
+
+RELEASE_URL="https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_CPP_VER}"
+
+echo ""
+echo "llama.cpp release URL:"
+echo "${RELEASE_URL}"
+
+# ============================================================
+# Temporary directory
+# ============================================================
+
+TMP_DIR="$(mktemp -d)"
+
+cleanup() {
+    rm -rf "${TMP_DIR}"
+}
+
+trap cleanup EXIT
+
+# ============================================================
+# Download helper
+# ============================================================
+
+download_file() {
+    local url="$1"
+    local output="$2"
+
+    echo ""
+    echo "------------------------------------------------------------"
+    echo "Downloading:"
+    echo "${url}"
+    echo "------------------------------------------------------------"
+
+    curl \
+        --fail \
+        --location \
+        --retry 3 \
+        --retry-delay 3 \
+        --connect-timeout 30 \
+        --max-time 1800 \
+        -o "${output}" \
+        "${url}"
+}
+
+# ============================================================
+# Download fnpack
+#
+# 保持原项目 fnpack 下载逻辑。
+# 如果你的原 prepare.sh 使用的 fnpack URL 不同，
+# 只需要保留原来的 URL 即可。
+# ============================================================
+
+FNPACK_URL="https://github.com/MasterRoc/fnpack/releases/download/v${FNPACK_VER}/fnpack"
+
+echo ""
+echo "Downloading fnpack..."
+echo "${FNPACK_URL}"
+
+download_file \
+    "${FNPACK_URL}" \
+    "${TMP_DIR}/fnpack"
+
+chmod +x "${TMP_DIR}/fnpack"
+
+cp "${TMP_DIR}/fnpack" ./fnpack
+
+# ============================================================
+# x86_64 Vulkan
+# ============================================================
+
+X64_ARCHIVE="llama-${LLAMA_CPP_VER}-bin-ubuntu-vulkan-x64.tar.gz"
+
+download_file \
+    "${RELEASE_URL}/${X64_ARCHIVE}" \
+    "${TMP_DIR}/${X64_ARCHIVE}"
+
+echo ""
+echo "Extracting x86_64 Vulkan..."
+
+rm -rf "${TMP_DIR}/x64"
+mkdir -p "${TMP_DIR}/x64"
+
+tar -xzf \
+    "${TMP_DIR}/${X64_ARCHIVE}" \
+    -C "${TMP_DIR}/x64"
+
+# ============================================================
+# ARM64 Vulkan
+# ============================================================
+
+ARM64_ARCHIVE="llama-${LLAMA_CPP_VER}-bin-ubuntu-vulkan-arm64.tar.gz"
+
+download_file \
+    "${RELEASE_URL}/${ARM64_ARCHIVE}" \
+    "${TMP_DIR}/${ARM64_ARCHIVE}"
+
+echo ""
+echo "Extracting ARM64 Vulkan..."
+
+rm -rf "${TMP_DIR}/arm64"
+mkdir -p "${TMP_DIR}/arm64"
+
+tar -xzf \
+    "${TMP_DIR}/${ARM64_ARCHIVE}" \
+    -C "${TMP_DIR}/arm64"
+
+# ============================================================
+# Copy x86_64 binaries
+# ============================================================
+
+echo ""
+echo "Installing x86_64 binaries..."
+
+find "${TMP_DIR}/x64" -type f -name "llama-server" -exec cp {} ./app/bin/x64/ \;
+
+find "${TMP_DIR}/x64" -type f -name "libggml-vulkan.so*" -exec cp {} ./app/bin/x64/ \;
+
+# ============================================================
+# Copy ARM64 binaries
+# ============================================================
+
+echo ""
+echo "Installing ARM64 binaries..."
+
+find "${TMP_DIR}/arm64" -type f -name "llama-server" -exec cp {} ./app/bin/arm64/ \;
+
+find "${TMP_DIR}/arm64" -type f -name "libggml-vulkan.so*" -exec cp {} ./app/bin/arm64/ \;
+
+# ============================================================
+# WebUI
+# ============================================================
+
+UI_ARCHIVE="llama-${LLAMA_CPP_VER}-ui.tar.gz"
+
+download_file \
+    "${RELEASE_URL}/${UI_ARCHIVE}" \
+    "${TMP_DIR}/${UI_ARCHIVE}"
+
+echo ""
+echo "Extracting WebUI..."
+
+rm -rf "${TMP_DIR}/webui"
+mkdir -p "${TMP_DIR}/webui"
+
+tar -xzf \
+    "${TMP_DIR}/${UI_ARCHIVE}" \
+    -C "${TMP_DIR}/webui"
+
+# ============================================================
+# Install WebUI
+# ============================================================
+
+echo ""
+echo "Installing WebUI..."
+
+find "${TMP_DIR}/webui" -mindepth 1 -maxdepth 1 -exec cp -a {} ./app/webui/ \;
+
+# ============================================================
+# Verify
+# ============================================================
+
+echo ""
+echo "============================================================"
+echo "Verifying llama.cpp installation"
+echo "============================================================"
+
+echo ""
+echo "x86_64:"
+ls -lah ./app/bin/x64/
+
+echo ""
+echo "ARM64:"
+ls -lah ./app/bin/arm64/
+
+echo ""
+echo "WebUI:"
+ls -lah ./app/webui/ | head -30
+
+echo ""
+
+if [ ! -f "./app/bin/x64/llama-server" ]; then
+    echo "ERROR: x86_64 llama-server not found!"
+    exit 1
+fi
+
+if [ ! -f "./app/bin/arm64/llama-server" ]; then
+    echo "ERROR: ARM64 llama-server not found!"
+    exit 1
+fi
+
+if ! find ./app/bin/x64 -type f -name "libggml-vulkan.so*" | grep -q .; then
+    echo "ERROR: x86_64 Vulkan library not found!"
+    exit 1
+fi
+
+if ! find ./app/bin/arm64 -type f -name "libggml-vulkan.so*" | grep -q .; then
+    echo "ERROR: ARM64 Vulkan library not found!"
+    exit 1
+fi
+
+if [ ! -f "./app/webui/index.html" ]; then
+    echo "ERROR: WebUI index.html not found!"
+    exit 1
+fi
+
+if [ ! -x "./fnpack" ]; then
+    echo "ERROR: fnpack not found or not executable!"
+    exit 1
+fi
+
+echo ""
+echo "============================================================"
+echo "Preparation completed successfully!"
 echo ""
 echo "llama.cpp version: ${LLAMA_CPP_VER}"
 echo "fnpack version:    ${FNPACK_VER}"
 echo ""
-
-# ---- 1. fnpack ----
-if [ -f "${SCRIPT_DIR}/fnpack.exe" ] || [ -f "${SCRIPT_DIR}/fnpack" ] || command -v fnpack &>/dev/null; then
-    echo "[1/3] fnpack: already present, skip"
-else
-    echo "[1/3] Downloading fnpack..."
-    case "$(uname -s)" in
-        Linux)
-            ARCH=$(uname -m)
-            case "${ARCH}" in
-                x86_64)  FNPACK_BIN="fnpack-${FNPACK_VER}-linux-amd64" ;;
-                aarch64) FNPACK_BIN="fnpack-${FNPACK_VER}-linux-arm64" ;;
-                *)       echo "Unsupported arch: ${ARCH}"; exit 1 ;;
-            esac
-            curl -L --connect-timeout 30 \
-                -o "${SCRIPT_DIR}/fnpack" \
-                "https://static2.fnnas.com/fnpack/${FNPACK_BIN}"
-            chmod +x "${SCRIPT_DIR}/fnpack"
-            echo "  -> fnpack (Linux)" ;;
-        MINGW*|MSYS*|CYGWIN*)
-            curl -L --connect-timeout 30 \
-                -o "${SCRIPT_DIR}/fnpack.exe" \
-                "https://static2.fnnas.com/fnpack/fnpack-${FNPACK_VER}-windows-amd64"
-            echo "  -> fnpack.exe (Windows)" ;;
-        *)
-            echo "WARN: unknown OS, please download fnpack manually"
-            echo "  https://developer.fnnas.com/docs/cli/fnpack/" ;;
-    esac
-fi
-
-# ---- 2. llama.cpp Vulkan binaries ----
-RELEASE_URL="https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_CPP_VER}"
-
-download_bin() {
-    local arch="$1"
-    local asset="$2"
-    local dest="${SCRIPT_DIR}/app/bin/${arch}"
-
-    if [ -f "${dest}/llama-server" ] && [ -f "${dest}/libggml-vulkan.so" ]; then
-        echo "[2/3] llama.cpp ${arch}: already present, skip"
-        return
-    fi
-
-    echo "[2/3] Downloading llama.cpp ${arch}..."
-    mkdir -p "${dest}"
-    local tmp="/tmp/llama-${arch}.tar.gz"
-    curl -L --connect-timeout 30 -o "${tmp}" "${RELEASE_URL}/${asset}"
-    tar xzf "${tmp}" --strip-components=1 -C "${dest}/" 2>/dev/null || true
-    rm -f "${tmp}"
-    echo "  -> $(ls "${dest}" | wc -l) files"
-}
-
-download_bin "x64"   "llama-${LLAMA_CPP_VER}-bin-ubuntu-vulkan-x64.tar.gz"
-download_bin "arm64" "llama-${LLAMA_CPP_VER}-bin-ubuntu-vulkan-arm64.tar.gz"
-
-# ---- 3. WebUI ----
-if [ -f "${SCRIPT_DIR}/app/webui/index.html" ]; then
-    echo "[3/3] WebUI: already present, skip"
-else
-    echo "[3/3] Downloading WebUI..."
-    mkdir -p "${SCRIPT_DIR}/app/webui"
-    tmp="/tmp/llama-ui.tar.gz"
-    curl -L --connect-timeout 30 -o "${tmp}" "${RELEASE_URL}/llama-${LLAMA_CPP_VER}-ui.tar.gz"
-    tar xzf "${tmp}" --strip-components=1 -C "${SCRIPT_DIR}/app/webui/" 2>/dev/null || true
-    rm -f "${tmp}"
-    echo "  -> $(find "${SCRIPT_DIR}/app/webui" -type f | wc -l) files"
-fi
-
-echo ""
-echo "========================================"
-echo "  依赖下载完成！"
-echo "========================================"
-echo ""
-echo "现在可以运行 ./build.sh 进行打包:"
-echo "  ./build.sh"
-echo ""
+echo "x86_64 llama-server: OK"
+echo "x86_64 Vulkan:       OK"
+echo "ARM64 llama-server:  OK"
+echo "ARM64 Vulkan:        OK"
+echo "WebUI:               OK"
+echo "fnpack:              OK"
+echo "============================================================"
