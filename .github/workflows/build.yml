@@ -1,1 +1,197 @@
 
+name: Build llama-cpp FPK
+
+on:
+  workflow_dispatch:
+    inputs:
+      llama_cpp_ver:
+        description: "llama.cpp release version"
+        required: true
+        default: "b10276"
+
+      fnpack_ver:
+        description: "fnpack version"
+        required: true
+        default: "1.2.3"
+
+  push:
+    branches:
+      - main
+
+jobs:
+  build-fpk:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      # ========================================
+      # 1. 获取源码
+      # ========================================
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      # ========================================
+      # 2. 安装构建环境
+      # ========================================
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            curl \
+            tar \
+            gzip \
+            python3 \
+            python3-pil
+
+      # ========================================
+      # 3. 设置脚本执行权限
+      # ========================================
+      - name: Make scripts executable
+        run: |
+          chmod +x prepare.sh
+          chmod +x build.sh
+
+      # ========================================
+      # 4. 下载项目依赖
+      #
+      # prepare.sh 会下载：
+      # - fnpack
+      # - llama.cpp x64 Vulkan
+      # - llama.cpp arm64 Vulkan
+      # - WebUI
+      # ========================================
+      - name: Prepare dependencies
+        env:
+          LLAMA_CPP_VER: ${{ github.event.inputs.llama_cpp_ver || 'b10276' }}
+          FNPACK_VER: ${{ github.event.inputs.fnpack_ver || '1.2.3' }}
+        run: |
+          echo "========================================"
+          echo "llama.cpp version: ${LLAMA_CPP_VER}"
+          echo "fnpack version:    ${FNPACK_VER}"
+          echo "========================================"
+
+          ./prepare.sh
+
+      # ========================================
+      # 5. 检查依赖是否完整
+      # ========================================
+      - name: Verify dependencies
+        run: |
+          set -e
+
+          echo "===== fnpack ====="
+          ls -lh ./fnpack
+          ./fnpack --help || true
+
+          echo ""
+          echo "===== x64 ====="
+          ls -lh app/bin/x64/
+
+          test -f app/bin/x64/llama-server
+          test -f app/bin/x64/libggml-vulkan.so
+
+          echo ""
+          echo "===== arm64 ====="
+          ls -lh app/bin/arm64/
+
+          test -f app/bin/arm64/llama-server
+          test -f app/bin/arm64/libggml-vulkan.so
+
+          echo ""
+          echo "===== WebUI ====="
+          test -f app/webui/index.html
+          find app/webui -type f | head -20
+
+          echo ""
+          echo "All dependencies verified."
+
+      # ========================================
+      # 6. 打包 FPK
+      # ========================================
+      - name: Build FPK
+        run: |
+          set -e
+
+          ./build.sh
+
+      # ========================================
+      # 7. 检查最终 FPK
+      # ========================================
+      - name: Verify FPK
+        run: |
+          set -e
+
+          echo "===== dist ====="
+          ls -lah dist/
+
+          FPK_COUNT=$(find dist -maxdepth 1 -type f -name "*.fpk" | wc -l)
+
+          echo "FPK count: ${FPK_COUNT}"
+
+          if [ "${FPK_COUNT}" -eq 0 ]; then
+            echo "ERROR: No .fpk file generated!"
+            exit 1
+          fi
+
+          echo ""
+          echo "FPK build successful."
+
+
+      # ========================================
+      # 8. 同时上传构建日志/信息
+      # ========================================
+      - name: Build summary
+        run: |
+          echo "## Build completed successfully" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### FPK files" >> "$GITHUB_STEP_SUMMARY"
+
+          for file in dist/*.fpk; do
+            echo "- $(basename "$file")" >> "$GITHUB_STEP_SUMMARY"
+            ls -lh "$file" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### llama.cpp" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: ${{ github.event.inputs.llama_cpp_ver || 'b10276' }}" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### fnpack" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: ${{ github.event.inputs.fnpack_ver || '1.2.3' }}" >> "$GITHUB_STEP_SUMMARY"
+      # ========================================
+      # 上传 FPK 到 Actions Artifact
+      # ========================================
+      - name: Upload FPK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-cpp-fnnas-fpk
+          path: dist/*.fpk
+          if-no-files-found: error
+          retention-days: 30
+
+      # ========================================
+      # 创建 GitHub Release
+      # ========================================
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: llama.cpp fnOS FPK Build ${{ github.run_number }}
+          body: |
+            ## llama.cpp fnOS FPK
+
+            自动构建版本。
+
+            - llama.cpp: ${{ github.event.inputs.llama_cpp_ver || 'b10276' }}
+            - fnpack: ${{ github.event.inputs.fnpack_ver || '1.2.3' }}
+            - Build: #${{ github.run_number }}
+            - Commit: ${{ github.sha }}
+
+            架构：
+            - x86_64
+            - arm64
+          files: |
+            dist/*.fpk
+          fail_on_unmatched_files: true
