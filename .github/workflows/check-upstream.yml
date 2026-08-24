@@ -2,88 +2,88 @@ name: Check llama.cpp upstream
 
 on:
   schedule:
-    # 每 30 分钟检查一次
     - cron: "*/30 * * * *"
 
   workflow_dispatch:
 
 permissions:
   contents: write
-  actions: write
 
 jobs:
-  check:
+  check-upstream:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Check latest llama.cpp release
-        id: check
+      - name: Check latest llama.cpp version
+        id: upstream
+        shell: bash
         run: |
           set -e
 
-          echo "Checking latest llama.cpp release..."
+          echo "Checking llama.cpp upstream..."
 
-          LATEST_VERSION=$(curl -fsSL \
+          VERSION=$(curl -fsSL \
             -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest" \
             | python3 -c 'import sys,json; print(json.load(sys.stdin)["tag_name"])')
 
-          echo "Latest upstream version: ${LATEST_VERSION}"
+          echo "Latest version: ${VERSION}"
 
-          if [ -z "${LATEST_VERSION}" ]; then
-            echo "ERROR: Failed to get latest llama.cpp version"
+          if [ -z "${VERSION}" ]; then
+            echo "Failed to get llama.cpp version"
             exit 1
           fi
 
-          echo "latest=${LATEST_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Check existing release
+      - name: Check whether version already exists
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
-          LATEST_VERSION: ${{ steps.check.outputs.latest }}
+          VERSION: ${{ steps.upstream.outputs.version }}
+        shell: bash
         run: |
           set -e
 
-          TAG_PREFIX="llama-${LATEST_VERSION}-build-"
+          echo "Checking existing release..."
 
-          echo "Checking existing releases..."
-          echo "Tag prefix: ${TAG_PREFIX}"
-
-          EXISTING=$(gh release list \
+          if gh release list \
             --limit 100 \
             --json tagName \
-            --jq ".[] | select(.tagName | startswith(\"${TAG_PREFIX}\")) | .tagName")
+            --jq '.[].tagName' \
+            | grep -q "^llama-${VERSION}-"; then
 
-          if [ -n "${EXISTING}" ]; then
-            echo "Version ${LATEST_VERSION} has already been built."
-            echo "${EXISTING}"
-
+            echo "Version ${VERSION} already exists."
             echo "exists=true" >> "$GITHUB_OUTPUT"
+
           else
-            echo "Version ${LATEST_VERSION} has not been built."
+
+            echo "Version ${VERSION} does not exist."
             echo "exists=false" >> "$GITHUB_OUTPUT"
+
           fi
 
-      - name: Trigger build
+      - name: Trigger build workflow
         if: steps.release.outputs.exists != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          LATEST_VERSION: ${{ steps.check.outputs.latest }}
+          VERSION: ${{ steps.upstream.outputs.version }}
+        shell: bash
         run: |
           set -e
 
           echo "========================================"
-          echo "New llama.cpp version detected!"
-          echo "Version: ${LATEST_VERSION}"
+          echo "New llama.cpp version detected"
+          echo "Version: ${VERSION}"
           echo "========================================"
 
           gh workflow run build.yml \
             --ref main \
-            -f llama_cpp_ver="${LATEST_VERSION}"
+            -f llama_cpp_ver="${VERSION}"
 
-          echo "Build workflow triggered successfully."
+          echo "Build workflow triggered."
+
+      - name: No build required
+        if: steps.release.outputs.exists == 'true'
+        run: |
+          echo "Current llama.cpp version has already been built."
