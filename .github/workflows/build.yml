@@ -1,13 +1,12 @@
-
 name: Build llama-cpp FPK
 
 on:
   workflow_dispatch:
     inputs:
       llama_cpp_ver:
-        description: "llama.cpp release version"
-        required: true
-        default: "b10612"
+        description: "llama.cpp release version（留空自动使用最新版本）"
+        required: false
+        default: ""
 
       fnpack_ver:
         description: "fnpack version"
@@ -29,12 +28,14 @@ jobs:
       # ========================================
       # 1. 获取源码
       # ========================================
+
       - name: Checkout source
         uses: actions/checkout@v4
 
       # ========================================
       # 2. 安装构建环境
       # ========================================
+
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -48,13 +49,54 @@ jobs:
       # ========================================
       # 3. 设置脚本执行权限
       # ========================================
+
       - name: Make scripts executable
         run: |
           chmod +x prepare.sh
           chmod +x build.sh
 
       # ========================================
-      # 4. 下载项目依赖
+      # 4. 获取 llama.cpp 版本
+      #
+      # 手动填写版本：
+      #   b10612
+      #
+      # 留空：
+      #   自动获取 ggml-org/llama.cpp 最新 Release
+      # ========================================
+
+      - name: Get llama.cpp version
+        id: llama-version
+        env:
+          LLAMA_CPP_VER_INPUT: ${{ github.event.inputs.llama_cpp_ver }}
+        run: |
+          set -e
+
+          if [ -n "${LLAMA_CPP_VER_INPUT}" ]; then
+            LLAMA_CPP_VER="${LLAMA_CPP_VER_INPUT}"
+            echo "Using manually specified llama.cpp version: ${LLAMA_CPP_VER}"
+          else
+            echo "Getting latest llama.cpp release..."
+
+            LLAMA_CPP_VER=$(curl -fsSL \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest" \
+              | python3 -c 'import sys,json; print(json.load(sys.stdin)["tag_name"])')
+
+            if [ -z "${LLAMA_CPP_VER}" ]; then
+              echo "ERROR: Failed to get latest llama.cpp version"
+              exit 1
+            fi
+
+            echo "Latest llama.cpp release: ${LLAMA_CPP_VER}"
+          fi
+
+          echo "LLAMA_CPP_VER=${LLAMA_CPP_VER}" >> "$GITHUB_ENV"
+          echo "version=${LLAMA_CPP_VER}" >> "$GITHUB_OUTPUT"
+
+      # ========================================
+      # 5. 下载项目依赖
       #
       # prepare.sh 会下载：
       # - fnpack
@@ -62,21 +104,24 @@ jobs:
       # - llama.cpp arm64 Vulkan
       # - WebUI
       # ========================================
+
       - name: Prepare dependencies
         env:
-          LLAMA_CPP_VER: ${{ github.event.inputs.llama_cpp_ver || 'b10276' }}
           FNPACK_VER: ${{ github.event.inputs.fnpack_ver || '1.2.3' }}
         run: |
+          set -e
+
           echo "========================================"
           echo "llama.cpp version: ${LLAMA_CPP_VER}"
-          echo "fnpack version:    ${FNPACK_VER}"
+          echo "fnpack version: ${FNPACK_VER}"
           echo "========================================"
 
           ./prepare.sh
 
       # ========================================
-      # 5. 检查依赖是否完整
+      # 6. 检查依赖是否完整
       # ========================================
+
       - name: Verify dependencies
         run: |
           set -e
@@ -88,14 +133,12 @@ jobs:
           echo ""
           echo "===== x64 ====="
           ls -lh app/bin/x64/
-
           test -f app/bin/x64/llama-server
           test -f app/bin/x64/libggml-vulkan.so
 
           echo ""
           echo "===== arm64 ====="
           ls -lh app/bin/arm64/
-
           test -f app/bin/arm64/llama-server
           test -f app/bin/arm64/libggml-vulkan.so
 
@@ -108,8 +151,9 @@ jobs:
           echo "All dependencies verified."
 
       # ========================================
-      # 6. 打包 FPK
+      # 7. 打包 FPK
       # ========================================
+
       - name: Build FPK
         run: |
           set -e
@@ -117,8 +161,9 @@ jobs:
           ./build.sh
 
       # ========================================
-      # 7. 检查最终 FPK
+      # 8. 检查最终 FPK
       # ========================================
+
       - name: Verify FPK
         run: |
           set -e
@@ -138,13 +183,22 @@ jobs:
           echo ""
           echo "FPK build successful."
 
+      # ========================================
+      # 9. 构建信息
+      # ========================================
 
-      # ========================================
-      # 8. 同时上传构建日志/信息
-      # ========================================
       - name: Build summary
         run: |
           echo "## Build completed successfully" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### llama.cpp" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: ${LLAMA_CPP_VER}" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### fnpack" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: ${{ github.event.inputs.fnpack_ver || '1.2.3' }}" >> "$GITHUB_STEP_SUMMARY"
+
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### FPK files" >> "$GITHUB_STEP_SUMMARY"
 
@@ -153,45 +207,44 @@ jobs:
             ls -lh "$file" >> "$GITHUB_STEP_SUMMARY"
           done
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### llama.cpp" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Version: ${{ github.event.inputs.llama_cpp_ver || 'b10276' }}" >> "$GITHUB_STEP_SUMMARY"
+      # ========================================
+      # 10. 上传 FPK 到 Actions Artifact
+      # ========================================
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### fnpack" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Version: ${{ github.event.inputs.fnpack_ver || '1.2.3' }}" >> "$GITHUB_STEP_SUMMARY"
-      # ========================================
-      # 上传 FPK 到 Actions Artifact
-      # ========================================
       - name: Upload FPK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: llama-cpp-fnnas-fpk
+          name: llama-cpp-fnnas-${{ env.LLAMA_CPP_VER }}
           path: dist/*.fpk
           if-no-files-found: error
           retention-days: 30
 
       # ========================================
-      # 创建 GitHub Release
+      # 11. 创建 GitHub Release
       # ========================================
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          name: llama.cpp fnOS FPK Build ${{ github.run_number }}
+          tag_name: llama-${{ env.LLAMA_CPP_VER }}-build-${{ github.run_number }}
+          name: llama.cpp ${{ env.LLAMA_CPP_VER }} fnOS FPK
           body: |
             ## llama.cpp fnOS FPK
 
             自动构建版本。
 
-            - llama.cpp: ${{ github.event.inputs.llama_cpp_ver || 'b10276' }}
+            - llama.cpp: ${{ env.LLAMA_CPP_VER }}
             - fnpack: ${{ github.event.inputs.fnpack_ver || '1.2.3' }}
             - Build: #${{ github.run_number }}
             - Commit: ${{ github.sha }}
 
             架构：
+
             - x86_64
             - arm64
+
+            llama.cpp 版本自动跟随上游：
+            https://github.com/ggml-org/llama.cpp/releases
           files: |
             dist/*.fpk
           fail_on_unmatched_files: true
