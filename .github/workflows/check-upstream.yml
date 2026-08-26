@@ -1,9 +1,7 @@
 name: Check llama.cpp upstream
 
 on:
-  schedule:
-    - cron: "*/30 * * * *"
-
+  
   workflow_dispatch:
 
 permissions:
