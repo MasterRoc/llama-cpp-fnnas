@@ -181,8 +181,7 @@ jobs:
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### fnpack" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Version: ${{ github.event.inputs.fnpack_ver || '1.2.3' }}" >> "$GITHUB_STEP_SUMMARY"
-
+          echo "- Version: 1.2.3" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### FPK files" >> "$GITHUB_STEP_SUMMARY"
 
@@ -218,7 +217,7 @@ jobs:
             自动构建版本。
 
             - llama.cpp: ${{ env.LLAMA_CPP_VER }}
-            - fnpack: ${{ github.event.inputs.fnpack_ver || '1.2.3' }}
+            - fnpack: 1.2.3
             - Build: #${{ github.run_number }}
             - Commit: ${{ github.sha }}
 
