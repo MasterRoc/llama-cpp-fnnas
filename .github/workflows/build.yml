@@ -2,16 +2,7 @@ name: Build llama-cpp FPK
 
 on:
   workflow_dispatch:
-    inputs:
-      llama_cpp_ver:
-        description: "llama.cpp release version（留空自动使用最新版本）"
-        required: false
-        default: ""
-
-      fnpack_ver:
-        description: "fnpack version"
-        required: true
-        default: "1.2.3"
+    
 
   push:
     branches:
