@@ -58,8 +58,7 @@ jobs:
 
       - name: Get llama.cpp version
         id: llama-version
-        env:
-          LLAMA_CPP_VER_INPUT: ${{ github.event.inputs.llama_cpp_ver }}
+        
         run: |
           set -e
 
@@ -98,7 +97,7 @@ jobs:
 
       - name: Prepare dependencies
         env:
-          FNPACK_VER: ${{ github.event.inputs.fnpack_ver || '1.2.3' }}
+          FNPACK_VER: "1.2.3"
         run: |
           set -e
 
