@@ -1,40 +1,32 @@
-
+```yaml
 name: Build llama-cpp FPK
 
 on:
   workflow_dispatch:
-
   push:
     branches:
       - main
 
-permissions:
-  contents: write
-
 concurrency:
-  group: llama-cpp-build
-  cancel-in-progress: false
+  group: llama-cpp-fpk-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-
   build-fpk:
-
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write
+
+    env:
+      FNPACK_VER: "1.2.3"
+
     steps:
-
-      # ============================================================
-      # 1. Checkout
-      # ============================================================
-
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # ============================================================
-      # 2. 安装构建环境
-      # ============================================================
-
       - name: Install dependencies
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -42,334 +34,295 @@ jobs:
 
           sudo apt-get install -y \
             curl \
+            wget \
+            ca-certificates \
             tar \
             gzip \
-            zstd \
+            unzip \
             python3 \
             python3-pil
 
-      # ============================================================
-      # 3. 设置脚本权限
-      # ============================================================
-
       - name: Make scripts executable
-        run: |
-          set -euo pipefail
-
-          chmod +x prepare.sh
-          chmod +x build.sh
-
-      # ============================================================
-      # 4. 获取 llama.cpp 最新版本
-      #
-      # llama.cpp 使用：
-      #
-      # b10696
-      # b10695
-      # b10694
-      #
-      # 这些版本可能属于 Pre-release。
-      #
-      # 不能使用：
-      #
-      # /releases/latest
-      #
-      # 因为它只返回正式 Release。
-      #
-      # 这里直接读取：
-      #
-      # /releases?per_page=100
-      #
-      # 然后只匹配：
-      #
-      # b数字
-      #
-      # 最终取数字最大的版本。
-      # ============================================================
-
-      - name: Get latest llama.cpp version
-        id: llama-version
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "========================================"
-          echo " Detecting llama.cpp version"
-          echo "========================================"
+          test -f ./prepare.sh
+          test -f ./build.sh
+
+          chmod +x ./prepare.sh
+          chmod +x ./build.sh
+
+      - name: Detect latest llama.cpp version
+        id: llama_version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "============================================================"
+          echo "Detecting latest llama.cpp version"
+          echo "============================================================"
 
           API_URL="https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=100"
+          RELEASE_JSON="/tmp/llama-releases.json"
 
-          echo ""
-          echo "Downloading release list..."
-          echo "${API_URL}"
-          echo ""
+          curl \
+            --fail \
+            --show-error \
+            --silent \
+            --location \
+            --retry 5 \
+            --retry-delay 2 \
+            --connect-timeout 30 \
+            --max-time 120 \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -o "${RELEASE_JSON}" \
+            "${API_URL}"
 
-          RELEASE_JSON="$(
-            curl \
-              -fsSL \
-              --retry 5 \
-              --retry-delay 2 \
-              --retry-connrefused \
-              --connect-timeout 30 \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "${API_URL}"
-          )"
-
-          if [ -z "${RELEASE_JSON}" ]; then
+          if [ ! -s "${RELEASE_JSON}" ]; then
             echo "ERROR: GitHub API returned empty response."
             exit 1
           fi
 
           LLAMA_CPP_VER="$(
-            printf '%s' "${RELEASE_JSON}" |
-            python3 -c '
-          import sys
-          import json
-          import re
+            python3 - "${RELEASE_JSON}" <<'PY'
+import json
+import re
+import sys
 
-          data = json.load(sys.stdin)
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    releases = json.load(f)
 
-          versions = []
+if not isinstance(releases, list):
+    raise SystemExit("GitHub API response is not a release list")
 
-          for release in data:
+versions = []
 
-              tag = release.get("tag_name", "")
+for release in releases:
+    if not isinstance(release, dict):
+        continue
 
-              match = re.fullmatch(r"b([0-9]+)", tag)
+    tag = str(release.get("tag_name", "")).strip()
 
-              if match:
-                  number = int(match.group(1))
-                  versions.append((number, tag))
+    match = re.fullmatch(r"b([0-9]+)", tag)
 
-          if not versions:
-              raise SystemExit(
-                  "ERROR: No bXXXXX llama.cpp releases found."
-              )
+    if match:
+        versions.append((int(match.group(1)), tag))
 
-          versions.sort(
-              key=lambda item: item[0],
-              reverse=True
-          )
+if not versions:
+    raise SystemExit("No bXXXXX release found")
 
-          print(versions[0][1])
-          '
+versions.sort(key=lambda item: item[0], reverse=True)
+
+print(versions[0][1])
+PY
           )"
 
-          if [ -z "${LLAMA_CPP_VER}" ]; then
-            echo "ERROR: Failed to detect llama.cpp version."
+          if ! printf '%s' "${LLAMA_CPP_VER}" | grep -Eq '^b[0-9]+$'; then
+            echo "ERROR: Unexpected llama.cpp version: ${LLAMA_CPP_VER}"
             exit 1
           fi
 
-          if ! printf '%s\n' "${LLAMA_CPP_VER}" | grep -Eq '^b[0-9]+$'; then
-            echo "ERROR: Unexpected llama.cpp version:"
-            echo "${LLAMA_CPP_VER}"
-            exit 1
-          fi
-
-          echo ""
-          echo "========================================"
-          echo " Latest llama.cpp:"
-          echo " ${LLAMA_CPP_VER}"
-          echo "========================================"
-          echo ""
-
-          echo "Recent versions:"
-
-          printf '%s' "${RELEASE_JSON}" |
-          python3 -c '
-          import sys
-          import json
-          import re
-
-          data = json.load(sys.stdin)
-
-          versions = []
-
-          for release in data:
-
-              tag = release.get("tag_name", "")
-
-              match = re.fullmatch(r"b([0-9]+)", tag)
-
-              if match:
-                  versions.append(
-                      (int(match.group(1)), tag)
-                  )
-
-          versions.sort(
-              key=lambda item: item[0],
-              reverse=True
-          )
-
-          for _, tag in versions[:10]:
-              print("  " + tag)
-          '
-
-          echo ""
+          echo "Latest llama.cpp version: ${LLAMA_CPP_VER}"
 
           echo "LLAMA_CPP_VER=${LLAMA_CPP_VER}" >> "${GITHUB_ENV}"
-
           echo "version=${LLAMA_CPP_VER}" >> "${GITHUB_OUTPUT}"
 
-      # ============================================================
-      # 5. Prepare
-      #
-      # prepare.sh:
-      #
-      # - 下载 fnpack
-      # - 下载 x64 Vulkan
-      # - 下载 arm64 Vulkan
-      # - 下载 WebUI
-      # - 创建 app/VERSION
-      # - 更新 app/manifest
-      # ============================================================
-
-      - name: Prepare dependencies
-        env:
-          FNPACK_VER: "1.2.3"
+      - name: Show build information
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "========================================"
-          echo " Preparing dependencies"
-          echo "========================================"
-
-          echo ""
+          echo "============================================================"
+          echo "Build information"
+          echo "============================================================"
           echo "llama.cpp: ${LLAMA_CPP_VER}"
           echo "fnpack: ${FNPACK_VER}"
-          echo ""
+          echo "commit: ${GITHUB_SHA}"
+          echo "run: #${GITHUB_RUN_NUMBER}"
+
+      - name: Prepare dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "============================================================"
+          echo "Preparing dependencies"
+          echo "============================================================"
 
           ./prepare.sh
 
-      # ============================================================
-      # 6. 检查依赖
-      # ============================================================
-
-      - name: Verify dependencies
+      - name: Verify app VERSION
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "========================================"
-          echo " fnpack"
-          echo "========================================"
-
-          if [ ! -f "./fnpack" ]; then
-            echo "ERROR: fnpack not found."
-            exit 1
-          fi
-
-          ls -lh ./fnpack
-
-          echo ""
-          echo "========================================"
-          echo " app/VERSION"
-          echo "========================================"
+          echo "============================================================"
+          echo "Checking app/VERSION"
+          echo "============================================================"
 
           if [ ! -f "./app/VERSION" ]; then
             echo "ERROR: app/VERSION not found."
             exit 1
           fi
 
-          cat ./app/VERSION
-
           echo ""
-          echo "========================================"
-          echo " app/manifest"
-          echo "========================================"
+          cat ./app/VERSION
+          echo ""
+
+          APP_VERSION="$(tr -d '\r\n ' < ./app/VERSION)"
+
+          echo "Expected: ${LLAMA_CPP_VER}"
+          echo "Actual:   ${APP_VERSION}"
+
+          if [ "${APP_VERSION}" != "${LLAMA_CPP_VER}" ]; then
+            echo "ERROR: app/VERSION mismatch."
+            exit 1
+          fi
+
+          echo "app/VERSION verified."
+
+      - name: Verify app manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "============================================================"
+          echo "Checking app/manifest"
+          echo "============================================================"
 
           if [ ! -f "./app/manifest" ]; then
             echo "ERROR: app/manifest not found."
             exit 1
           fi
 
+          echo ""
           cat ./app/manifest
+          echo ""
+
+          MANIFEST_VERSION="$(
+            sed -n 's/^version=//p' ./app/manifest |
+            head -n 1 |
+            tr -d '\r'
+          )"
+
+          echo "Expected: ${LLAMA_CPP_VER}"
+          echo "Actual:   ${MANIFEST_VERSION}"
+
+          if [ "${MANIFEST_VERSION}" != "${LLAMA_CPP_VER}" ]; then
+            echo "ERROR: app/manifest version mismatch."
+            exit 1
+          fi
+
+          echo "app/manifest verified."
+
+      - name: Verify llama.cpp binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "============================================================"
+          echo "Checking llama.cpp binaries"
+          echo "============================================================"
+
+          for ARCH in x64 arm64; do
+            DIR="./app/bin/${ARCH}"
+
+            echo ""
+            echo "Architecture: ${ARCH}"
+
+            if [ ! -d "${DIR}" ]; then
+              echo "ERROR: Directory not found: ${DIR}"
+              exit 1
+            fi
+
+            if [ ! -f "${DIR}/llama-server" ]; then
+              echo "ERROR: llama-server not found in ${DIR}"
+              exit 1
+            fi
+
+            if [ ! -f "${DIR}/libggml-vulkan.so" ]; then
+              echo "ERROR: libggml-vulkan.so not found in ${DIR}"
+              exit 1
+            fi
+
+            echo "llama-server:"
+            ls -lh "${DIR}/llama-server"
+
+            echo "libggml-vulkan.so:"
+            ls -lh "${DIR}/libggml-vulkan.so"
+          done
 
           echo ""
-          echo "========================================"
-          echo " x64"
-          echo "========================================"
+          echo "All llama.cpp binaries verified."
 
-          if [ ! -f "./app/bin/x64/llama-server" ]; then
-            echo "ERROR: x64 llama-server not found."
+      - name: Verify WebUI
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "============================================================"
+          echo "Checking WebUI"
+          echo "============================================================"
+
+          if [ ! -d "./app/webui" ]; then
+            echo "ERROR: app/webui not found."
             exit 1
           fi
-
-          if [ ! -f "./app/bin/x64/libggml-vulkan.so" ]; then
-            echo "ERROR: x64 Vulkan library not found."
-            exit 1
-          fi
-
-          find ./app/bin/x64 -type f -print
-
-          echo ""
-          echo "========================================"
-          echo " arm64"
-          echo "========================================"
-
-          if [ ! -f "./app/bin/arm64/llama-server" ]; then
-            echo "ERROR: arm64 llama-server not found."
-            exit 1
-          fi
-
-          if [ ! -f "./app/bin/arm64/libggml-vulkan.so" ]; then
-            echo "ERROR: arm64 Vulkan library not found."
-            exit 1
-          fi
-
-          find ./app/bin/arm64 -type f -print
-
-          echo ""
-          echo "========================================"
-          echo " WebUI"
-          echo "========================================"
 
           if [ ! -f "./app/webui/index.html" ]; then
-            echo "ERROR: WebUI index.html not found."
+            echo "ERROR: app/webui/index.html not found."
             exit 1
           fi
 
-          find ./app/webui -type f -print | head -100
+          echo "WebUI verified."
 
           echo ""
-          echo "Dependency verification successful."
+          echo "WebUI file count:"
+          find ./app/webui -type f | wc -l
 
-      # ============================================================
-      # 7. 构建 FPK
-      # ============================================================
+      - name: Verify fnpack
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "============================================================"
+          echo "Checking fnpack"
+          echo "============================================================"
+
+          if [ -x "./fnpack" ]; then
+            ls -lh ./fnpack
+            ./fnpack --help || true
+          else
+            echo "ERROR: ./fnpack not found."
+            exit 1
+          fi
 
       - name: Build FPK
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "========================================"
-          echo " Building FPK"
-          echo "========================================"
+          echo "============================================================"
+          echo "Building FPK"
+          echo "============================================================"
 
           ./build.sh
-
-      # ============================================================
-      # 8. 检查 FPK
-      # ============================================================
 
       - name: Verify FPK
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "========================================"
-          echo " FPK result"
-          echo "========================================"
+          echo "============================================================"
+          echo "Checking FPK"
+          echo "============================================================"
 
           if [ ! -d "./dist" ]; then
             echo "ERROR: dist directory not found."
             exit 1
           fi
-
-          ls -lah ./dist
 
           FPK_COUNT="$(
             find ./dist \
@@ -379,7 +332,6 @@ jobs:
             wc -l
           )"
 
-          echo ""
           echo "FPK count: ${FPK_COUNT}"
 
           if [ "${FPK_COUNT}" -eq 0 ]; then
@@ -388,11 +340,13 @@ jobs:
           fi
 
           echo ""
-          echo "FPK build successful."
-
-      # ============================================================
-      # 9. Build Summary
-      # ============================================================
+          echo "Generated FPK files:"
+          find ./dist \
+            -maxdepth 1 \
+            -type f \
+            -name "*.fpk" \
+            -print |
+          sort
 
       - name: Build summary
         shell: bash
@@ -400,37 +354,31 @@ jobs:
           set -euo pipefail
 
           {
-            echo "## llama.cpp FPK Build"
+            echo "# llama.cpp FPK Build"
             echo ""
-            echo "### llama.cpp"
-            echo "- Version: ${LLAMA_CPP_VER}"
+            echo "## Build information"
             echo ""
-            echo "### fnpack"
-            echo "- Version: 1.2.3"
+            echo "- llama.cpp: \`${LLAMA_CPP_VER}\`"
+            echo "- fnpack: \`${FNPACK_VER}\`"
+            echo "- Build: \`#${GITHUB_RUN_NUMBER}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
             echo ""
-            echo "### Architecture"
-            echo "- x86_64 Vulkan"
-            echo "- ARM64 Vulkan"
+            echo "## Architectures"
             echo ""
-            echo "### WebUI"
-            echo "- Included"
+            echo "- x86_64"
+            echo "- arm64"
             echo ""
-            echo "### FPK"
+            echo "## FPK files"
+            echo ""
+
+            for FILE in ./dist/*.fpk; do
+              if [ -f "${FILE}" ]; then
+                SIZE="$(du -h "${FILE}" | cut -f1)"
+                echo "- \`$(basename "${FILE}")\` — ${SIZE}"
+              fi
+            done
+
           } >> "${GITHUB_STEP_SUMMARY}"
-
-          for file in dist/*.fpk; do
-
-            echo "- $(basename "${file}")" \
-              >> "${GITHUB_STEP_SUMMARY}"
-
-            ls -lh "${file}" \
-              >> "${GITHUB_STEP_SUMMARY}"
-
-          done
-
-      # ============================================================
-      # 10. 上传 Artifact
-      # ============================================================
 
       - name: Upload FPK artifact
         uses: actions/upload-artifact@v4
@@ -440,45 +388,38 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # ============================================================
-      # 11. 创建 GitHub Release
-      # ============================================================
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
-
         with:
-
-          tag_name: ${{ env.LLAMA_CPP_VER }}
-
+          tag_name: llama-${{ env.LLAMA_CPP_VER }}
           name: llama.cpp ${{ env.LLAMA_CPP_VER }} fnOS FPK
-
-          generate_release_notes: true
-
           body: |
             # llama.cpp fnOS FPK
 
-            自动跟随 llama.cpp 上游最新 `bXXXXX` 版本构建。
+            自动构建版本。
 
             ## Version
 
             - llama.cpp: `${{ env.LLAMA_CPP_VER }}`
-            - fnpack: `1.2.3`
+            - fnpack: `${{ env.FNPACK_VER }}`
 
-            ## Architecture
+            ## Architectures
 
             - x86_64
-            - ARM64
+            - arm64
 
             ## GPU
 
-            - Vulkan
+            Vulkan GPU acceleration.
 
-            ## WebUI
+            ## Features
 
-            - Included
+            - GGUF model support
+            - OpenAI-compatible API
+            - OpenAI-compatible API
+            - Built-in WebUI
 
-            ## Source
+            ## Upstream
 
             https://github.com/ggml-org/llama.cpp
 
@@ -491,4 +432,5 @@ jobs:
             dist/*.fpk
 
           fail_on_unmatched_files: true
-
+          generate_release_notes: true
+```
