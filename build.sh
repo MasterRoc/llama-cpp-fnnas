@@ -1,85 +1,69 @@
-```bash
+bash
 #!/usr/bin/env bash
 
 # ============================================================
 # llama.cpp for fnOS - Build Script
 #
 # 功能：
+#   1. 检查 app/VERSION
+#   2. 检查 app/manifest
+#   3. 检查 manifest 版本
+#   4. 检查 x64 Vulkan
+#   5. 检查 arm64 Vulkan
+#   6. 检查 WebUI
+#   7. 检查 fnpack
+#   8. 自动生成应用图标
+#   9. 使用 fnpack 打包 FPK
+#  10. 自动整理到 dist/
 #
-# 1. 自动读取 app/VERSION
-# 2. 自动寻找 manifest 模板
-# 3. 自动生成 app/manifest
-# 4. 强制 manifest version 与 app/VERSION 一致
-# 5. 自动替换 __VERSION__
-# 6. 防止 VERSION 占位符进入 FPK
-# 7. 检查 llama.cpp x64 / arm64 Vulkan
-# 8. 检查 WebUI
-# 9. 使用 fnpack build 打包
-# 10. 自动整理 dist/*.fpk
+# 注意：
+#   prepare.sh 必须先执行。
 #
-# 示例：
+#   prepare.sh 会生成：
 #
-# app/VERSION
-#     b10696
-#
-# app/manifest
-#     version=b10696
-#
-# 最终：
-#
-#     dist/*.fpk
+#       app/VERSION
+#       app/manifest
+#       app/bin/x64/
+#       app/bin/arm64/
+#       app/webui/
 #
 # ============================================================
 
 set -euo pipefail
 
+# ============================================================
+# 基础路径
+# ============================================================
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 APP_DIR="${SCRIPT_DIR}/app"
-OUTPUT_DIR="${SCRIPT_DIR}/dist"
+BIN_DIR="${APP_DIR}/bin"
+WEBUI_DIR="${APP_DIR}/webui"
 
 VERSION_FILE="${APP_DIR}/VERSION"
 MANIFEST_FILE="${APP_DIR}/manifest"
 
-echo ""
+OUTPUT_DIR="${SCRIPT_DIR}/dist"
+
 echo "============================================================"
-echo " llama.cpp for fnOS - FPK Build"
+echo " llama.cpp for fnOS"
+echo " FPK Build"
 echo "============================================================"
-echo ""
-
-# ============================================================
-# 1. 检查 app
-# ============================================================
-
-echo "[1/8] Checking application directory..."
-
-if [ ! -d "${APP_DIR}" ]; then
-    echo ""
-    echo "ERROR: app directory not found:"
-    echo "${APP_DIR}"
-    echo ""
-    echo "Please run ./prepare.sh first."
-    exit 1
-fi
-
-echo "OK: ${APP_DIR}"
 echo ""
 
 # ============================================================
-# 2. 获取版本
+# 读取版本
 # ============================================================
 
-echo "============================================================"
-echo " Version"
-echo "============================================================"
+echo "[1/8] Checking application version..."
 echo ""
 
 if [ ! -f "${VERSION_FILE}" ]; then
     echo "ERROR: app/VERSION not found:"
     echo "${VERSION_FILE}"
     echo ""
-    echo "Please run:"
-    echo "  ./prepare.sh"
+    echo "Please run ./prepare.sh first."
     exit 1
 fi
 
@@ -90,389 +74,296 @@ if [ -z "${LLAMA_CPP_VER}" ]; then
     exit 1
 fi
 
-echo "llama.cpp version:"
-echo "${LLAMA_CPP_VER}"
-
-# 只允许 bXXXXX
 if ! printf '%s\n' "${LLAMA_CPP_VER}" | grep -Eq '^b[0-9]+$'; then
-    echo ""
-    echo "ERROR: Invalid llama.cpp version:"
+    echo "ERROR: invalid llama.cpp version:"
     echo "${LLAMA_CPP_VER}"
     echo ""
-    echo "Expected format:"
-    echo "  bXXXXX"
+    echo "Expected format: bXXXXX"
     exit 1
 fi
 
-echo ""
-echo "Version format: OK"
+echo "llama.cpp version: ${LLAMA_CPP_VER}"
 echo ""
 
 # ============================================================
-# 3. 查找 manifest
+# 检查 manifest
 # ============================================================
 
-echo "============================================================"
-echo " Manifest"
-echo "============================================================"
+echo "[2/8] Checking manifest..."
 echo ""
 
-MANIFEST_TEMPLATE=""
-
-# 优先使用项目根目录 manifest
-if [ -f "${SCRIPT_DIR}/manifest" ]; then
-
-    MANIFEST_TEMPLATE="${SCRIPT_DIR}/manifest"
-
-# 其次使用 app/manifest
-elif [ -f "${APP_DIR}/manifest" ]; then
-
-    MANIFEST_TEMPLATE="${APP_DIR}/manifest"
-
-# config/manifest
-elif [ -f "${SCRIPT_DIR}/config/manifest" ]; then
-
-    MANIFEST_TEMPLATE="${SCRIPT_DIR}/config/manifest"
-
-# package/manifest
-elif [ -f "${SCRIPT_DIR}/package/manifest" ]; then
-
-    MANIFEST_TEMPLATE="${SCRIPT_DIR}/package/manifest"
-
-fi
-
-if [ -z "${MANIFEST_TEMPLATE}" ]; then
-
-    echo "ERROR: manifest template not found."
+if [ ! -f "${MANIFEST_FILE}" ]; then
+    echo "ERROR: app/manifest not found:"
+    echo "${MANIFEST_FILE}"
     echo ""
-    echo "Searched:"
-    echo "  ${SCRIPT_DIR}/manifest"
-    echo "  ${APP_DIR}/manifest"
-    echo "  ${SCRIPT_DIR}/config/manifest"
-    echo "  ${SCRIPT_DIR}/package/manifest"
-    echo ""
+    echo "Please run ./prepare.sh first."
     exit 1
-
 fi
 
-echo "Manifest template:"
-echo "${MANIFEST_TEMPLATE}"
+echo "Manifest:"
+echo "${MANIFEST_FILE}"
 echo ""
 
 # ============================================================
-# 4. 生成 app/manifest
+# 检查 manifest 版本
 # ============================================================
-
-echo "Creating app/manifest..."
-
-# 如果模板不是 app/manifest，复制
-if [ "${MANIFEST_TEMPLATE}" != "${MANIFEST_FILE}" ]; then
-    cp "${MANIFEST_TEMPLATE}" "${MANIFEST_FILE}"
-fi
-
-# 处理 CRLF
-sed -i 's/\r$//' "${MANIFEST_FILE}"
-
-# ------------------------------------------------------------
-# 替换 __VERSION__
-# ------------------------------------------------------------
-
-sed -i \
-    "s/__VERSION__/${LLAMA_CPP_VER}/g" \
-    "${MANIFEST_FILE}"
-
-# ------------------------------------------------------------
-# 替换 version=
-# ------------------------------------------------------------
-
-if grep -q '^version=' "${MANIFEST_FILE}"; then
-
-    sed -i \
-        "s/^version=.*/version=${LLAMA_CPP_VER}/" \
-        "${MANIFEST_FILE}"
-
-else
-
-    echo "manifest has no version= field."
-    echo "Adding version=${LLAMA_CPP_VER}"
-
-    TEMP_MANIFEST="$(mktemp)"
-
-    {
-        echo "version=${LLAMA_CPP_VER}"
-        cat "${MANIFEST_FILE}"
-    } > "${TEMP_MANIFEST}"
-
-    mv "${TEMP_MANIFEST}" "${MANIFEST_FILE}"
-
-fi
-
-echo ""
-echo "app/manifest generated:"
-echo "------------------------------------------------------------"
-cat "${MANIFEST_FILE}"
-echo "------------------------------------------------------------"
-echo ""
-
-# ============================================================
-# 5. 检查 manifest 版本
-# ============================================================
-
-echo "============================================================"
-echo " Manifest verification"
-echo "============================================================"
-echo ""
 
 MANIFEST_VERSION="$(
     sed -n 's/^version=//p' "${MANIFEST_FILE}" |
     head -n 1 |
-    tr -d '\r' |
-    tr -d '[:space:]'
+    tr -d '\r'
 )"
 
-echo "Expected:"
+if [ -z "${MANIFEST_VERSION}" ]; then
+    echo "ERROR: version= not found in app/manifest"
+    echo ""
+    cat "${MANIFEST_FILE}"
+    exit 1
+fi
+
+echo "VERSION file:"
 echo "  ${LLAMA_CPP_VER}"
 
-echo ""
 echo "Manifest:"
 echo "  ${MANIFEST_VERSION}"
-
-if [ -z "${MANIFEST_VERSION}" ]; then
-
-    echo ""
-    echo "ERROR: manifest version is empty."
-    exit 1
-
-fi
+echo ""
 
 if [ "${MANIFEST_VERSION}" != "${LLAMA_CPP_VER}" ]; then
-
+    echo "ERROR: version mismatch!"
     echo ""
-    echo "ERROR: manifest version mismatch."
-    echo ""
-    echo "Expected:"
+    echo "app/VERSION:"
     echo "  ${LLAMA_CPP_VER}"
     echo ""
-    echo "Actual:"
+    echo "app/manifest:"
     echo "  ${MANIFEST_VERSION}"
-    exit 1
-
-fi
-
-# ------------------------------------------------------------
-# 禁止占位符
-# ------------------------------------------------------------
-
-if grep -Eq '^version=(VERSION|__VERSION__)$' "${MANIFEST_FILE}"; then
-
     echo ""
-    echo "ERROR: manifest still contains a placeholder:"
-    grep '^version=' "${MANIFEST_FILE}" || true
+    echo "Please run ./prepare.sh again."
     exit 1
-
 fi
 
-echo ""
-echo "Manifest version: OK"
+echo "Manifest version OK."
 echo ""
 
 # ============================================================
-# 6. 检查应用文件
+# 检查 fnpack
 # ============================================================
 
-echo "============================================================"
-echo " Application verification"
-echo "============================================================"
+echo "[3/8] Checking fnpack..."
 echo ""
 
-# ------------------------------------------------------------
-# VERSION
-# ------------------------------------------------------------
-
-echo "[1] app/VERSION"
-
-if [ ! -f "${APP_DIR}/VERSION" ]; then
-    echo "ERROR: app/VERSION not found."
-    exit 1
-fi
-
-echo "  $(cat "${APP_DIR}/VERSION")"
-echo "  OK"
-echo ""
-
-# ------------------------------------------------------------
-# MANIFEST
-# ------------------------------------------------------------
-
-echo "[2] app/manifest"
-
-if [ ! -f "${APP_DIR}/manifest" ]; then
-    echo "ERROR: app/manifest not found."
-    exit 1
-fi
-
-echo "  OK"
-echo ""
-
-# ------------------------------------------------------------
-# x64
-# ------------------------------------------------------------
-
-echo "[3] x64 llama-server"
-
-if [ ! -f "${APP_DIR}/bin/x64/llama-server" ]; then
-    echo "ERROR: x64 llama-server not found."
-    exit 1
-fi
-
-ls -lh "${APP_DIR}/bin/x64/llama-server"
-echo "  OK"
-echo ""
-
-echo "[4] x64 Vulkan"
-
-if [ ! -f "${APP_DIR}/bin/x64/libggml-vulkan.so" ]; then
-    echo "ERROR: x64 libggml-vulkan.so not found."
-    exit 1
-fi
-
-ls -lh "${APP_DIR}/bin/x64/libggml-vulkan.so"
-echo "  OK"
-echo ""
-
-# ------------------------------------------------------------
-# arm64
-# ------------------------------------------------------------
-
-echo "[5] arm64 llama-server"
-
-if [ ! -f "${APP_DIR}/bin/arm64/llama-server" ]; then
-    echo "ERROR: arm64 llama-server not found."
-    exit 1
-fi
-
-ls -lh "${APP_DIR}/bin/arm64/llama-server"
-echo "  OK"
-echo ""
-
-echo "[6] arm64 Vulkan"
-
-if [ ! -f "${APP_DIR}/bin/arm64/libggml-vulkan.so" ]; then
-    echo "ERROR: arm64 libggml-vulkan.so not found."
-    exit 1
-fi
-
-ls -lh "${APP_DIR}/bin/arm64/libggml-vulkan.so"
-echo "  OK"
-echo ""
-
-# ------------------------------------------------------------
-# WebUI
-# ------------------------------------------------------------
-
-echo "[7] WebUI"
-
-if [ ! -f "${APP_DIR}/webui/index.html" ]; then
-    echo "ERROR: WebUI index.html not found."
-    exit 1
-fi
-
-echo "  ${APP_DIR}/webui/index.html"
-echo "  OK"
-echo ""
-
-# ============================================================
-# 7. 查找 fnpack
-# ============================================================
-
-echo "============================================================"
-echo " fnpack"
-echo "============================================================"
-echo ""
-
-FNPACK_CMD=""
+FNPACK=""
 
 if [ -x "${SCRIPT_DIR}/fnpack" ]; then
-
-    FNPACK_CMD="${SCRIPT_DIR}/fnpack"
+    FNPACK="${SCRIPT_DIR}/fnpack"
 
 elif [ -f "${SCRIPT_DIR}/fnpack.exe" ]; then
-
-    FNPACK_CMD="${SCRIPT_DIR}/fnpack.exe"
+    FNPACK="${SCRIPT_DIR}/fnpack.exe"
 
 elif command -v fnpack >/dev/null 2>&1; then
-
-    FNPACK_CMD="$(command -v fnpack)"
+    FNPACK="$(command -v fnpack)"
 
 fi
 
-if [ -z "${FNPACK_CMD}" ]; then
-
+if [ -z "${FNPACK}" ]; then
     echo "ERROR: fnpack not found."
     echo ""
-    echo "Please run ./prepare.sh first."
+    echo "Expected one of:"
+    echo "  ${SCRIPT_DIR}/fnpack"
+    echo "  ${SCRIPT_DIR}/fnpack.exe"
+    echo "  fnpack in PATH"
+    echo ""
     exit 1
-
 fi
 
 echo "fnpack:"
-echo "${FNPACK_CMD}"
+echo "  ${FNPACK}"
 echo ""
 
-# 注意：
-# 不执行 fnpack --version
-# 因为当前 fnpack 不支持 --version
+# 不使用 fnpack --version
+#
+# 你当前的 fnpack 不支持：
+#
+#   fnpack --version
+#
+# 因此这里只检查 help。
+#
+if ! "${FNPACK}" --help >/dev/null 2>&1; then
+    echo "WARNING: fnpack --help failed."
+    echo "Continuing anyway..."
+fi
 
-# ============================================================
-# 8. 清理旧构建
-# ============================================================
-
-echo "============================================================"
-echo " Cleaning old build"
-echo "============================================================"
+echo "fnpack check completed."
 echo ""
 
-rm -rf "${OUTPUT_DIR}"
+# ============================================================
+# 检查 x64 Vulkan
+# ============================================================
 
-mkdir -p "${OUTPUT_DIR}"
+echo "[4/8] Checking x64 Vulkan..."
+echo ""
 
-# 删除项目根目录旧 FPK
-find "${SCRIPT_DIR}" \
-    -maxdepth 1 \
+X64_DIR="${BIN_DIR}/x64"
+
+if [ ! -d "${X64_DIR}" ]; then
+    echo "ERROR: x64 directory not found:"
+    echo "${X64_DIR}"
+    echo ""
+    exit 1
+fi
+
+if [ ! -f "${X64_DIR}/llama-server" ]; then
+    echo "ERROR: x64 llama-server not found:"
+    echo "${X64_DIR}/llama-server"
+    exit 1
+fi
+
+if [ ! -f "${X64_DIR}/libggml-vulkan.so" ]; then
+    echo "ERROR: x64 libggml-vulkan.so not found:"
+    echo "${X64_DIR}/libggml-vulkan.so"
+    exit 1
+fi
+
+chmod +x "${X64_DIR}/llama-server" || true
+
+echo "x64 llama-server:"
+ls -lh "${X64_DIR}/llama-server"
+
+echo ""
+
+echo "x64 Vulkan library:"
+ls -lh "${X64_DIR}/libggml-vulkan.so"
+
+echo ""
+echo "x64 Vulkan check OK."
+echo ""
+
+# ============================================================
+# 检查 arm64 Vulkan
+# ============================================================
+
+echo "[5/8] Checking arm64 Vulkan..."
+echo ""
+
+ARM64_DIR="${BIN_DIR}/arm64"
+
+if [ ! -d "${ARM64_DIR}" ]; then
+    echo "ERROR: arm64 directory not found:"
+    echo "${ARM64_DIR}"
+    echo ""
+    exit 1
+fi
+
+if [ ! -f "${ARM64_DIR}/llama-server" ]; then
+    echo "ERROR: arm64 llama-server not found:"
+    echo "${ARM64_DIR}/llama-server"
+    exit 1
+fi
+
+if [ ! -f "${ARM64_DIR}/libggml-vulkan.so" ]; then
+    echo "ERROR: arm64 libggml-vulkan.so not found:"
+    echo "${ARM64_DIR}/libggml-vulkan.so"
+    exit 1
+fi
+
+chmod +x "${ARM64_DIR}/llama-server" || true
+
+echo "arm64 llama-server:"
+ls -lh "${ARM64_DIR}/llama-server"
+
+echo ""
+
+echo "arm64 Vulkan library:"
+ls -lh "${ARM64_DIR}/libggml-vulkan.so"
+
+echo ""
+echo "arm64 Vulkan check OK."
+echo ""
+
+# ============================================================
+# 检查 WebUI
+# ============================================================
+
+echo "[6/8] Checking WebUI..."
+echo ""
+
+if [ ! -d "${WEBUI_DIR}" ]; then
+    echo "ERROR: WebUI directory not found:"
+    echo "${WEBUI_DIR}"
+    exit 1
+fi
+
+if [ ! -f "${WEBUI_DIR}/index.html" ]; then
+    echo "ERROR: WebUI index.html not found:"
+    echo "${WEBUI_DIR}/index.html"
+    exit 1
+fi
+
+WEBUI_COUNT="$(
+    find "${WEBUI_DIR}" -type f | wc -l
+)"
+
+echo "WebUI files: ${WEBUI_COUNT}"
+echo ""
+
+if [ "${WEBUI_COUNT}" -eq 0 ]; then
+    echo "ERROR: WebUI is empty."
+    exit 1
+fi
+
+echo "WebUI check OK."
+echo ""
+
+# ============================================================
+# 检查 app 目录
+# ============================================================
+
+echo "Checking app structure..."
+echo ""
+
+if [ ! -d "${APP_DIR}" ]; then
+    echo "ERROR: app directory not found."
+    exit 1
+fi
+
+echo "Application files:"
+find "${APP_DIR}" \
+    -maxdepth 2 \
     -type f \
-    -name '*.fpk' \
-    -delete
+    -print |
+sort
 
-echo "Old build files cleaned."
 echo ""
 
 # ============================================================
-# 生成图标
+# 图标
 # ============================================================
 
-echo "============================================================"
-echo " Icons"
-echo "============================================================"
+echo "[7/8] Checking application icons..."
 echo ""
 
-if [ -f "${SCRIPT_DIR}/generate_icons.py" ]; then
+ICON_GENERATOR="${SCRIPT_DIR}/generate_icons.py"
 
-    if [ -f "${SCRIPT_DIR}/ICON_SOURCE.PNG" ] || \
-       [ -f "${SCRIPT_DIR}/ICON_SOURCE.png" ] || \
-       [ -f "${SCRIPT_DIR}/ICON_SOURCE" ] || \
-       [ ! -f "${SCRIPT_DIR}/ICON.PNG" ] || \
+if [ -f "${ICON_GENERATOR}" ]; then
+
+    if [ -f "${SCRIPT_DIR}/ICON_SOURCE.PNG" ] ||
+       [ -f "${SCRIPT_DIR}/ICON_SOURCE.png" ] ||
+       [ -f "${SCRIPT_DIR}/ICON_SOURCE" ] ||
+       [ ! -f "${SCRIPT_DIR}/ICON.PNG" ] ||
        [ ! -f "${SCRIPT_DIR}/ICON_256.PNG" ]; then
 
         echo "Generating application icons..."
 
-        python3 "${SCRIPT_DIR}/generate_icons.py"
+        if ! command -v python3 >/dev/null 2>&1; then
+            echo "ERROR: python3 not found."
+            exit 1
+        fi
 
-        echo "Icons generated."
+        python3 "${ICON_GENERATOR}"
 
     else
 
         echo "Icons already exist."
-        echo "Skipping."
+        echo "Skipping icon generation."
 
     fi
 
@@ -486,76 +377,104 @@ fi
 echo ""
 
 # ============================================================
-# 打包前最终版本检查
+# 清理旧 FPK
 # ============================================================
 
-echo "============================================================"
-echo " Pre-build version check"
-echo "============================================================"
+echo "Cleaning previous build files..."
 echo ""
 
-FINAL_VERSION="$(
-    tr -d '[:space:]' < "${APP_DIR}/VERSION"
-)"
+rm -rf "${OUTPUT_DIR}"
 
-FINAL_MANIFEST_VERSION="$(
-    sed -n 's/^version=//p' "${APP_DIR}/manifest" |
-    head -n 1 |
-    tr -d '\r' |
-    tr -d '[:space:]'
-)"
+mkdir -p "${OUTPUT_DIR}"
 
-echo "app/VERSION:"
-echo "  ${FINAL_VERSION}"
+find "${SCRIPT_DIR}" \
+    -maxdepth 1 \
+    -type f \
+    -name "*.fpk" \
+    -delete
 
-echo ""
-echo "app/manifest:"
-echo "  ${FINAL_MANIFEST_VERSION}"
-
-# ------------------------------------------------------------
-# VERSION 一致
-# ------------------------------------------------------------
-
-if [ "${FINAL_VERSION}" != "${LLAMA_CPP_VER}" ]; then
-
-    echo ""
-    echo "ERROR: app/VERSION changed unexpectedly."
-    exit 1
-
-fi
-
-# ------------------------------------------------------------
-# manifest 一致
-# ------------------------------------------------------------
-
-if [ "${FINAL_MANIFEST_VERSION}" != "${LLAMA_CPP_VER}" ]; then
-
-    echo ""
-    echo "ERROR: app/manifest version changed unexpectedly."
-    exit 1
-
-fi
-
-# ------------------------------------------------------------
-# 禁止 VERSION 占位符
-# ------------------------------------------------------------
-
-if grep -Eq '^version=(VERSION|__VERSION__)$' "${APP_DIR}/manifest"; then
-
-    echo ""
-    echo "ERROR: VERSION placeholder detected."
-    echo ""
-    grep '^version=' "${APP_DIR}/manifest" || true
-    exit 1
-
-fi
-
-echo ""
-echo "Pre-build version check: PASS"
+echo "Clean completed."
 echo ""
 
 # ============================================================
-# 开始 fnpack build
+# fnpack 构建函数
+# ============================================================
+
+run_fnpack_build() {
+
+    echo "Running fnpack build..."
+    echo ""
+
+    # --------------------------------------------------------
+    # Linux fnpack
+    # --------------------------------------------------------
+
+    if [ "${FNPACK}" != *.exe ] && [ -x "${FNPACK}" ]; then
+
+        echo "Using native fnpack:"
+        echo "${FNPACK}"
+        echo ""
+
+        "${FNPACK}" build --directory "${SCRIPT_DIR}"
+
+        return $?
+
+    fi
+
+    # --------------------------------------------------------
+    # Windows fnpack.exe
+    # --------------------------------------------------------
+
+    if [ -f "${SCRIPT_DIR}/fnpack.exe" ]; then
+
+        echo "Using Windows fnpack.exe"
+
+        # WSL 环境
+        if command -v wslpath >/dev/null 2>&1; then
+
+            WIN_DIR="$(wslpath -w "${SCRIPT_DIR}")"
+
+            echo "Windows project path:"
+            echo "${WIN_DIR}"
+            echo ""
+
+            "${SCRIPT_DIR}/fnpack.exe" \
+                build \
+                --directory "${WIN_DIR}"
+
+            return $?
+
+        fi
+
+        # Git Bash / MSYS
+        "${SCRIPT_DIR}/fnpack.exe" \
+            build \
+            --directory "${SCRIPT_DIR}"
+
+        return $?
+
+    fi
+
+    # --------------------------------------------------------
+    # PATH 中的 fnpack
+    # --------------------------------------------------------
+
+    if command -v fnpack >/dev/null 2>&1; then
+
+        echo "Using fnpack from PATH"
+
+        fnpack build --directory "${SCRIPT_DIR}"
+
+        return $?
+
+    fi
+
+    echo "ERROR: Unable to execute fnpack."
+    exit 1
+}
+
+# ============================================================
+# 执行打包
 # ============================================================
 
 echo "============================================================"
@@ -563,166 +482,55 @@ echo " Building FPK"
 echo "============================================================"
 echo ""
 
-cd "${SCRIPT_DIR}"
-
-# ------------------------------------------------------------
-# Windows fnpack.exe
-# ------------------------------------------------------------
-
-if [[ "${FNPACK_CMD}" == *.exe ]]; then
-
-    echo "Detected Windows fnpack.exe"
-
-    if command -v wslpath >/dev/null 2>&1; then
-
-        WIN_DIR="$(wslpath -w "${SCRIPT_DIR}")"
-
-    else
-
-        # WSL fallback
-        if [[ "${SCRIPT_DIR}" =~ ^/mnt/([a-zA-Z])/(.*)$ ]]; then
-
-            DRIVE="${BASH_REMATCH[1]}"
-            REST="${BASH_REMATCH[2]}"
-
-            WIN_DIR="${DRIVE^^}:/${REST}"
-
-        else
-
-            echo "ERROR: Unable to convert WSL path:"
-            echo "${SCRIPT_DIR}"
-            exit 1
-
-        fi
-
-    fi
-
-    echo "Build directory:"
-    echo "${WIN_DIR}"
-    echo ""
-
-    "${FNPACK_CMD}" \
-        build \
-        --directory "${WIN_DIR}"
-
-# ------------------------------------------------------------
-# Linux fnpack
-# ------------------------------------------------------------
-
-else
-
-    echo "Using Linux fnpack"
-
-    "${FNPACK_CMD}" \
-        build \
-        --directory "${SCRIPT_DIR}"
-
-fi
-
-# ============================================================
-# 查找生成的 FPK
-# ============================================================
+run_fnpack_build
 
 echo ""
-echo "============================================================"
-echo " Collecting FPK"
-echo "============================================================"
+
+# ============================================================
+# 查找 FPK
+# ============================================================
+
+echo "[8/8] Collecting FPK..."
 echo ""
 
-FPK_FOUND=0
+FPK_FILES=()
 
-while IFS= read -r -d '' FPK_FILE; do
-
-    FPK_FOUND=1
-
-    FPK_NAME="$(basename "${FPK_FILE}")"
-
-    echo "Generated:"
-    echo "  ${FPK_NAME}"
-
-    echo "Size:"
-    ls -lh "${FPK_FILE}"
-
-    echo ""
-
+while IFS= read -r -d '' file; do
+    FPK_FILES+=("${file}")
 done < <(
     find "${SCRIPT_DIR}" \
         -maxdepth 1 \
         -type f \
-        -name '*.fpk' \
+        -name "*.fpk" \
         -print0
 )
 
-if [ "${FPK_FOUND}" -eq 0 ]; then
+if [ "${#FPK_FILES[@]}" -eq 0 ]; then
 
     echo "ERROR: No .fpk file generated."
     echo ""
-    echo "Project root:"
-    ls -lah "${SCRIPT_DIR}"
+    echo "Please check the fnpack build output above."
+    echo ""
+
     exit 1
 
 fi
 
 # ============================================================
-# 检查 FPK 文件名
+# 移动 FPK 到 dist
 # ============================================================
 
-echo "============================================================"
-echo " FPK verification"
-echo "============================================================"
-echo ""
+for file in "${FPK_FILES[@]}"; do
 
-while IFS= read -r -d '' FPK_FILE; do
+    filename="$(basename "${file}")"
 
-    FPK_NAME="$(basename "${FPK_FILE}")"
+    echo "Moving:"
+    echo "  ${filename}"
 
-    echo "Checking:"
-    echo "  ${FPK_NAME}"
+    mv "${file}" "${OUTPUT_DIR}/${filename}"
 
-    # 禁止 VERSION
-    if [[ "${FPK_NAME}" == *"VERSION"* ]]; then
+done
 
-        echo ""
-        echo "ERROR: FPK filename contains VERSION:"
-        echo "${FPK_NAME}"
-        exit 1
-
-    fi
-
-    # 禁止 __VERSION__
-    if [[ "${FPK_NAME}" == *__VERSION__* ]]; then
-
-        echo ""
-        echo "ERROR: FPK filename contains __VERSION__:"
-        echo "${FPK_NAME}"
-        exit 1
-
-    fi
-
-    echo "  OK"
-    echo ""
-
-done < <(
-    find "${SCRIPT_DIR}" \
-        -maxdepth 1 \
-        -type f \
-        -name '*.fpk' \
-        -print0
-)
-
-# ============================================================
-# 移动到 dist
-# ============================================================
-
-echo "Moving FPK files to dist..."
-
-find "${SCRIPT_DIR}" \
-    -maxdepth 1 \
-    -type f \
-    -name '*.fpk' \
-    -exec mv {} "${OUTPUT_DIR}/" \;
-
-echo "Done."
 echo ""
 
 # ============================================================
@@ -734,92 +542,37 @@ echo " Final verification"
 echo "============================================================"
 echo ""
 
-DIST_COUNT="$(
+FINAL_FPK_COUNT="$(
     find "${OUTPUT_DIR}" \
         -maxdepth 1 \
         -type f \
-        -name '*.fpk' |
-    wc -l |
-    tr -d '[:space:]'
+        -name "*.fpk" |
+    wc -l
 )"
 
-echo "FPK count:"
-echo "${DIST_COUNT}"
-
-if [ "${DIST_COUNT}" -eq 0 ]; then
-
-    echo ""
-    echo "ERROR: No FPK found in dist."
+if [ "${FINAL_FPK_COUNT}" -eq 0 ]; then
+    echo "ERROR: No FPK found in dist/"
     exit 1
-
 fi
 
-echo ""
-echo "Generated FPK:"
+echo "FPK count: ${FINAL_FPK_COUNT}"
 echo ""
 
+echo "Generated FPK:"
 find "${OUTPUT_DIR}" \
     -maxdepth 1 \
     -type f \
-    -name '*.fpk' \
-    -printf '  %f\n' |
-sort
+    -name "*.fpk" \
+    -exec ls -lh {} \;
 
 echo ""
-
-echo "File sizes:"
-echo ""
-
-ls -lh "${OUTPUT_DIR}"/*.fpk
 
 # ============================================================
-# 最终版本
+# Build Summary
 # ============================================================
 
-echo ""
 echo "============================================================"
-echo " Final version"
-echo "============================================================"
-echo ""
-
-echo "llama.cpp:"
-echo "  ${LLAMA_CPP_VER}"
-
-echo ""
-echo "app/VERSION:"
-echo "  ${FINAL_VERSION}"
-
-echo ""
-echo "app/manifest:"
-echo "  ${FINAL_MANIFEST_VERSION}"
-
-# ============================================================
-# 最终版本必须一致
-# ============================================================
-
-if [ "${FINAL_VERSION}" != "${FINAL_MANIFEST_VERSION}" ]; then
-
-    echo ""
-    echo "ERROR: FINAL VERSION MISMATCH"
-    exit 1
-
-fi
-
-if [ "${FINAL_VERSION}" != "${LLAMA_CPP_VER}" ]; then
-
-    echo ""
-    echo "ERROR: FINAL LLAMA VERSION MISMATCH"
-    exit 1
-
-fi
-
-# ============================================================
-# 完成
-# ============================================================
-
-echo ""
-echo "============================================================"
-echo " BUILD SUCCESS"
+echo " Build completed successfully"
 echo "============================================================"
 echo ""
 
@@ -828,18 +581,42 @@ echo "  ${LLAMA_CPP_VER}"
 
 echo ""
 
-echo "FPK output:"
-echo "  ${OUTPUT_DIR}"
+echo "Manifest version:"
+echo "  ${MANIFEST_VERSION}"
+
+echo ""
+
+echo "Architecture:"
+echo "  x86_64"
+echo "  arm64"
+
+echo ""
+
+echo "Vulkan:"
+echo "  x64:   OK"
+echo "  arm64: OK"
+
+echo ""
+
+echo "WebUI:"
+echo "  ${WEBUI_COUNT} files"
+
+echo ""
+
+echo "FPK:"
+echo "  ${OUTPUT_DIR}/"
 
 echo ""
 
 for file in "${OUTPUT_DIR}"/*.fpk; do
+    [ -e "${file}" ] || continue
     echo "  $(basename "${file}")"
 done
 
 echo ""
+
 echo "============================================================"
-echo " Ready for fnOS installation"
+echo " Ready"
 echo "============================================================"
 echo ""
-```
+
