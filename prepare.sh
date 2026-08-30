@@ -54,7 +54,60 @@ TMP_DIR="${SCRIPT_DIR}/.prepare-tmp"
 
 FNPACK_PATH="${SCRIPT_DIR}/fnpack"
 
-MANIFEST_FILE="${APP_DIR}/manifest"
+# ============================================================
+# 自动查找 manifest
+# ============================================================
+
+MANIFEST_FILE=""
+
+for candidate in \
+    "${APP_DIR}/manifest" \
+    "${APP_DIR}/config/manifest" \
+    "${SCRIPT_DIR}/manifest" \
+    "${SCRIPT_DIR}/config/manifest"
+do
+    if [ -f "${candidate}" ]; then
+        MANIFEST_FILE="${candidate}"
+        break
+    fi
+done
+
+# 如果常见位置都没有，则自动搜索
+if [ -z "${MANIFEST_FILE}" ]; then
+
+    MANIFEST_FILE="$(
+        find "${SCRIPT_DIR}" \
+            -type f \
+            \( -name "manifest" -o -name "manifest.conf" \) \
+            -print \
+            | head -1
+    )"
+
+fi
+
+if [ -z "${MANIFEST_FILE}" ] || [ ! -f "${MANIFEST_FILE}" ]; then
+
+    echo ""
+    echo "============================================================"
+    echo "ERROR: manifest not found"
+    echo "============================================================"
+    echo ""
+
+    echo "Current project files:"
+    find "${SCRIPT_DIR}/app" \
+        -maxdepth 4 \
+        -type f \
+        -print \
+        2>/dev/null || true
+
+    echo ""
+
+    exit 1
+
+fi
+
+echo "Manifest found:"
+echo "${MANIFEST_FILE}"
 
 VERSION_FILE="${APP_DIR}/VERSION"
 
