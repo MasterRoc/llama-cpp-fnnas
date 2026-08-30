@@ -1,3 +1,4 @@
+```yaml
 name: Build llama-cpp FPK
 
 on:
@@ -7,8 +8,23 @@ on:
     branches:
       - main
 
+
+# ========================================
+# 全局环境变量
+# ========================================
+
+env:
+  FNPACK_VER: "1.2.3"
+
+
 jobs:
+
+  # ========================================
+  # 构建 FPK
+  # ========================================
+
   build-fpk:
+
     runs-on: ubuntu-latest
 
     permissions:
@@ -23,13 +39,18 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+
       # ========================================
       # 2. 安装构建环境
       # ========================================
 
       - name: Install dependencies
+        shell: bash
         run: |
+          set -euo pipefail
+
           sudo apt-get update
+
           sudo apt-get install -y \
             curl \
             tar \
@@ -37,71 +58,139 @@ jobs:
             python3 \
             python3-pil
 
+
       # ========================================
       # 3. 设置脚本执行权限
       # ========================================
 
       - name: Make scripts executable
+        shell: bash
         run: |
+          set -euo pipefail
+
           chmod +x prepare.sh
           chmod +x build.sh
 
+          echo "Scripts:"
+          ls -lah prepare.sh build.sh
+
+
       # ========================================
-      # 4. 获取 llama.cpp 版本
+      # 4. 获取 llama.cpp 最新正式 Release
       #
-      # 手动填写版本：
-      #   b10612
+      # 上游版本格式：
       #
-      # 留空：
-      #   自动获取 ggml-org/llama.cpp 最新 Release
+      #   b10694
+      #   b10693
+      #   b10692
+      #
+      # 不使用 v0.x.x
       # ========================================
 
       - name: Get llama.cpp version
         id: llama-version
+        shell: bash
 
         run: |
-          set -e
+          set -euo pipefail
 
-          if [ -n "${LLAMA_CPP_VER_INPUT}" ]; then
-            LLAMA_CPP_VER="${LLAMA_CPP_VER_INPUT}"
-            echo "Using manually specified llama.cpp version: ${LLAMA_CPP_VER}"
-          else
-            echo "Getting latest llama.cpp release..."
+          echo "========================================"
+          echo "Getting latest llama.cpp release..."
+          echo "========================================"
 
-            LLAMA_CPP_VER=$(curl -fsSL \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest" \
-              | python3 -c 'import sys,json; print(json.load(sys.stdin)["tag_name"])')
+          API_URL="https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
 
-            if [ -z "${LLAMA_CPP_VER}" ]; then
-              echo "ERROR: Failed to get latest llama.cpp version"
-              exit 1
-            fi
+          LLAMA_CPP_VER=$(curl -fsSL \
+            --retry 5 \
+            --retry-delay 2 \
+            --retry-connrefused \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${API_URL}" \
+            | python3 -c '
+          import sys
+          import json
+          import re
 
-            echo "Latest llama.cpp release: ${LLAMA_CPP_VER}"
+          data = json.load(sys.stdin)
+
+          tag = data.get("tag_name", "").strip()
+
+          if not tag:
+              raise SystemExit(
+                  "ERROR: GitHub API did not return tag_name"
+              )
+
+          # llama.cpp 正式 Release 使用 bXXXXX 格式
+          if not re.fullmatch(r"b[0-9]+", tag):
+              raise SystemExit(
+                  f"ERROR: Unexpected llama.cpp release tag: {tag}"
+              )
+
+          print(tag)
+          ')
+
+          if [ -z "${LLAMA_CPP_VER}" ]; then
+            echo "ERROR: Failed to get llama.cpp version"
+            exit 1
           fi
 
+          echo ""
+          echo "========================================"
+          echo "Latest llama.cpp version: ${LLAMA_CPP_VER}"
+          echo "========================================"
+          echo ""
+
+          # 写入 GitHub 环境变量
           echo "LLAMA_CPP_VER=${LLAMA_CPP_VER}" >> "$GITHUB_ENV"
+
+          # 写入 step output
           echo "version=${LLAMA_CPP_VER}" >> "$GITHUB_OUTPUT"
 
+
       # ========================================
-      # 5. 下载项目依赖
+      # 5. 显示构建版本
+      # ========================================
+
+      - name: Show build versions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "========================================"
+          echo "Build information"
+          echo "========================================"
+          echo "llama.cpp : ${LLAMA_CPP_VER}"
+          echo "fnpack    : ${FNPACK_VER}"
+          echo "commit    : ${GITHUB_SHA}"
+          echo "run       : #${GITHUB_RUN_NUMBER}"
+          echo "========================================"
+
+
+      # ========================================
+      # 6. 下载项目依赖
       #
-      # prepare.sh 会下载：
+      # prepare.sh 负责：
+      #
       # - fnpack
-      # - llama.cpp x64 Vulkan
+      # - llama.cpp x86_64 Vulkan
       # - llama.cpp arm64 Vulkan
       # - WebUI
+      #
+      # LLAMA_CPP_VER 会自动传递给 prepare.sh
       # ========================================
 
       - name: Prepare dependencies
+        shell: bash
         env:
-          FNPACK_VER: "1.2.3"
+          LLAMA_CPP_VER: ${{ env.LLAMA_CPP_VER }}
+          FNPACK_VER: ${{ env.FNPACK_VER }}
 
         run: |
-          set -e
+          set -euo pipefail
 
+          echo "========================================"
+          echo "Preparing dependencies"
           echo "========================================"
           echo "llama.cpp version: ${LLAMA_CPP_VER}"
           echo "fnpack version: ${FNPACK_VER}"
@@ -109,56 +198,129 @@ jobs:
 
           ./prepare.sh
 
+
       # ========================================
-      # 6. 检查依赖是否完整
+      # 7. 检查依赖是否完整
       # ========================================
 
       - name: Verify dependencies
         shell: bash
 
         run: |
+          set -euo pipefail
+
+          echo ""
+          echo "========================================"
           echo "===== fnpack ====="
-          ls -lah ./fnpack || true
-          ./fnpack --version || true
+          echo "========================================"
+
+          if [ -d "./fnpack" ]; then
+            ls -lah ./fnpack
+          else
+            echo "WARNING: ./fnpack directory not found"
+          fi
+
+          if [ -x "./fnpack" ]; then
+            ./fnpack --version || true
+          fi
+
 
           echo ""
+          echo "========================================"
           echo "===== app/bin ====="
-          find ./app/bin -type f -print 2>/dev/null || true
+          echo "========================================"
+
+          if [ -d "./app/bin" ]; then
+            find ./app/bin \
+              -type f \
+              -printf '%p (%s bytes)\n' \
+              | sort
+          else
+            echo "WARNING: ./app/bin not found"
+          fi
+
 
           echo ""
+          echo "========================================"
           echo "===== app/webui ====="
-          find ./app/webui -type f -print 2>/dev/null | head -100 || true
+          echo "========================================"
+
+          if [ -d "./app/webui" ]; then
+            find ./app/webui \
+              -type f \
+              -printf '%p (%s bytes)\n' \
+              | head -100
+          else
+            echo "WARNING: ./app/webui not found"
+          fi
+
 
           echo ""
+          echo "========================================"
           echo "===== directory structure ====="
-          find ./app -maxdepth 3 -type f -print 2>/dev/null || true
+          echo "========================================"
+
+          if [ -d "./app" ]; then
+            find ./app \
+              -maxdepth 4 \
+              -type f \
+              -print \
+              | sort
+          else
+            echo "ERROR: ./app directory not found"
+            exit 1
+          fi
+
 
           echo ""
           echo "Dependency verification finished."
 
+
       # ========================================
-      # 7. 打包 FPK
+      # 8. 打包 FPK
       # ========================================
 
       - name: Build FPK
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
+
+          echo "========================================"
+          echo "Building FPK"
+          echo "========================================"
+          echo "llama.cpp: ${LLAMA_CPP_VER}"
+          echo "========================================"
 
           ./build.sh
 
+
       # ========================================
-      # 8. 检查最终 FPK
+      # 9. 检查最终 FPK
       # ========================================
 
       - name: Verify FPK
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
+          echo "========================================"
           echo "===== dist ====="
+          echo "========================================"
+
+          if [ ! -d "dist" ]; then
+            echo "ERROR: dist directory does not exist!"
+            exit 1
+          fi
+
           ls -lah dist/
 
-          FPK_COUNT=$(find dist -maxdepth 1 -type f -name "*.fpk" | wc -l)
+          FPK_COUNT=$(find dist \
+            -maxdepth 1 \
+            -type f \
+            -name "*.fpk" \
+            | wc -l)
 
+          echo ""
           echo "FPK count: ${FPK_COUNT}"
 
           if [ "${FPK_COUNT}" -eq 0 ]; then
@@ -169,68 +331,135 @@ jobs:
           echo ""
           echo "FPK build successful."
 
+
       # ========================================
-      # 9. 构建信息
+      # 10. 生成 GitHub Actions Summary
       # ========================================
 
       - name: Build summary
+        shell: bash
         run: |
-          echo "## Build completed successfully" >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### llama.cpp" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Version: ${LLAMA_CPP_VER}" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### fnpack" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Version: 1.2.3" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### FPK files" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Build completed successfully"
+            echo ""
+            echo "### llama.cpp"
+            echo "- Version: \`${LLAMA_CPP_VER}\`"
+            echo "- Upstream: ggml-org/llama.cpp"
+            echo ""
+            echo "### fnpack"
+            echo "- Version: \`${FNPACK_VER}\`"
+            echo ""
+            echo "### Build"
+            echo "- Run: #${GITHUB_RUN_NUMBER}"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo ""
+            echo "### Architecture"
+            echo "- x86_64"
+            echo "- arm64"
+            echo ""
+            echo "### FPK files"
+          } >> "$GITHUB_STEP_SUMMARY"
 
           for file in dist/*.fpk; do
-            echo "- $(basename "$file")" >> "$GITHUB_STEP_SUMMARY"
-            ls -lh "$file" >> "$GITHUB_STEP_SUMMARY"
+            if [ -f "$file" ]; then
+              SIZE=$(du -h "$file" | cut -f1)
+
+              echo "- \`$(basename "$file")\` — ${SIZE}" \
+                >> "$GITHUB_STEP_SUMMARY"
+            fi
           done
 
+          {
+            echo ""
+            echo "### Upstream Release"
+            echo ""
+            echo "https://github.com/ggml-org/llama.cpp/releases/tag/${LLAMA_CPP_VER}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+
       # ========================================
-      # 10. 上传 FPK 到 Actions Artifact
+      # 11. 上传 FPK 到 Actions Artifact
       # ========================================
 
       - name: Upload FPK artifact
         uses: actions/upload-artifact@v4
+
         with:
           name: llama-cpp-fnnas-${{ env.LLAMA_CPP_VER }}
-          path: dist/*.fpk
+
+          path: |
+            dist/*.fpk
+
           if-no-files-found: error
+
           retention-days: 30
 
+
       # ========================================
-      # 11. 创建 GitHub Release
+      # 12. 创建 GitHub Release
       # ========================================
 
-      - name: Create Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
+
         with:
+
+          # Release Tag
+          #
+          # 例如：
+          # llama-b10694-build-123
+          #
           tag_name: llama-${{ env.LLAMA_CPP_VER }}-build-${{ github.run_number }}
+
+          # Release 名称
+          #
+          # 例如：
+          # llama.cpp b10694 fnOS FPK
+          #
           name: llama.cpp ${{ env.LLAMA_CPP_VER }} fnOS FPK
+
           body: |
             ## llama.cpp fnOS FPK
 
-            自动构建版本。
+            自动构建的 llama.cpp fnOS FPK。
 
-            - llama.cpp: ${{ env.LLAMA_CPP_VER }}
-            - fnpack: 1.2.3
+            ### llama.cpp
+
+            - Version: `${{ env.LLAMA_CPP_VER }}`
+            - Upstream: ggml-org/llama.cpp
+            - Release:
+              https://github.com/ggml-org/llama.cpp/releases/tag/${{ env.LLAMA_CPP_VER }}
+
+            ### fnpack
+
+            - Version: `1.2.3`
+
+            ### Build
+
             - Build: #${{ github.run_number }}
-            - Commit: ${{ github.sha }}
+            - Commit: `${{ github.sha }}`
 
-            架构：
+            ### Architecture
 
             - x86_64
             - arm64
 
-            llama.cpp 版本自动跟随上游：
-            https://github.com/ggml-org/llama.cpp/releases
+            ### Features
+
+            - Vulkan GPU acceleration
+            - GGUF model support
+            - OpenAI-compatible API
+            - Built-in WebUI
+
+            llama.cpp 版本自动跟随上游最新正式 Release。
+
           files: |
             dist/*.fpk
+
           fail_on_unmatched_files: true
+
+          # 如果同一个 tag 已存在则覆盖更新
+          overwrite_files: true
+```
