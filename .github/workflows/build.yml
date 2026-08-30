@@ -1,4 +1,4 @@
-```yaml
+
 name: Build llama-cpp FPK
 
 on:
