@@ -1,4 +1,3 @@
-bash
 #!/bin/bash
 
 # ============================================================
@@ -7,15 +6,15 @@ bash
 # 功能：
 #
 # 1. 下载 fnpack
-# 2. 下载 llama.cpp x86_64 Vulkan
+# 2. 下载 llama.cpp x64 Vulkan
 # 3. 下载 llama.cpp ARM64 Vulkan
 # 4. 下载 llama.cpp WebUI
-# 5. 自动设置 app/VERSION
-# 6. 自动修改 app/manifest 版本号
+# 5. 自动写入 app/VERSION
+# 6. 自动修改根目录 manifest 的 version
 # 7. 自动进行 WebUI 中文化
-# 8. 完整检查依赖
+# 8. 检查所有依赖
 #
-# llama.cpp 版本格式：
+# llama.cpp Release 版本：
 #
 #   b10694
 #   b10695
@@ -24,18 +23,14 @@ bash
 # 不使用：
 #
 #   v0.3.0
-#   0.3.0
-#
-# LLAMA_CPP_VER 由 GitHub Actions 提供。
 #
 # ============================================================
-
 
 set -euo pipefail
 
 
 # ============================================================
-# 基础路径
+# 基础目录
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -54,76 +49,21 @@ TMP_DIR="${SCRIPT_DIR}/.prepare-tmp"
 
 FNPACK_PATH="${SCRIPT_DIR}/fnpack"
 
-# ============================================================
-# 自动查找 manifest
-# ============================================================
-
-MANIFEST_FILE=""
-
-for candidate in \
-    "${APP_DIR}/manifest" \
-    "${APP_DIR}/config/manifest" \
-    "${SCRIPT_DIR}/manifest" \
-    "${SCRIPT_DIR}/config/manifest"
-do
-    if [ -f "${candidate}" ]; then
-        MANIFEST_FILE="${candidate}"
-        break
-    fi
-done
-
-# 如果常见位置都没有，则自动搜索
-if [ -z "${MANIFEST_FILE}" ]; then
-
-    MANIFEST_FILE="$(
-        find "${SCRIPT_DIR}" \
-            -type f \
-            \( -name "manifest" -o -name "manifest.conf" \) \
-            -print \
-            | head -1
-    )"
-
-fi
-
-if [ -z "${MANIFEST_FILE}" ] || [ ! -f "${MANIFEST_FILE}" ]; then
-
-    echo ""
-    echo "============================================================"
-    echo "ERROR: manifest not found"
-    echo "============================================================"
-    echo ""
-
-    echo "Current project files:"
-    find "${SCRIPT_DIR}/app" \
-        -maxdepth 4 \
-        -type f \
-        -print \
-        2>/dev/null || true
-
-    echo ""
-
-    exit 1
-
-fi
-
-echo "Manifest found:"
-echo "${MANIFEST_FILE}"
+MANIFEST_FILE="${SCRIPT_DIR}/manifest"
 
 VERSION_FILE="${APP_DIR}/VERSION"
 
 
 # ============================================================
-# 版本
+# llama.cpp 版本
 # ============================================================
 
 if [ -z "${LLAMA_CPP_VER:-}" ]; then
 
     echo ""
+    echo "============================================================"
     echo "ERROR: LLAMA_CPP_VER is not set."
-    echo ""
-    echo "Example:"
-    echo ""
-    echo "  LLAMA_CPP_VER=b10694 ./prepare.sh"
+    echo "============================================================"
     echo ""
 
     exit 1
@@ -131,19 +71,14 @@ if [ -z "${LLAMA_CPP_VER:-}" ]; then
 fi
 
 
-FNPACK_VER="${FNPACK_VER:-1.2.3}"
-
-
 # ============================================================
-# 检查 llama.cpp 版本格式
+# 检查版本格式
 #
-# llama.cpp 当前 Release 使用：
+# 必须是：
 #
-#   bXXXXX
+# b10694
 #
-# 例如：
-#
-#   b10694
+# b10695
 #
 # ============================================================
 
@@ -154,21 +89,27 @@ if ! printf '%s\n' "${LLAMA_CPP_VER}" | grep -Eq '^b[0-9]+$'; then
     echo "ERROR: Invalid llama.cpp version"
     echo "============================================================"
     echo ""
+
     echo "Received:"
     echo "${LLAMA_CPP_VER}"
+
     echo ""
-    echo "Expected format:"
+
+    echo "Expected:"
     echo "bXXXXX"
-    echo ""
-    echo "Examples:"
-    echo "b10694"
-    echo "b10695"
-    echo "b10696"
+
     echo ""
 
     exit 1
 
 fi
+
+
+# ============================================================
+# fnpack
+# ============================================================
+
+FNPACK_VER="${FNPACK_VER:-1.2.3}"
 
 
 # ============================================================
@@ -186,10 +127,6 @@ rm -rf "${TMP_DIR}"
 
 mkdir -p "${TMP_DIR}"
 
-
-# ============================================================
-# 清理函数
-# ============================================================
 
 cleanup() {
 
@@ -212,15 +149,9 @@ download_file() {
 
 
     echo ""
-    echo "------------------------------------------------------------"
-    echo "Downloading"
-    echo "------------------------------------------------------------"
-    echo ""
-    echo "URL:"
+    echo "Downloading:"
     echo "${url}"
-    echo ""
-    echo "Output:"
-    echo "${output}"
+
     echo ""
 
 
@@ -262,7 +193,7 @@ download_file() {
 
 
 # ============================================================
-# 检查普通文件
+# 文件检查
 # ============================================================
 
 check_file() {
@@ -313,6 +244,11 @@ echo "fnpack version    : ${FNPACK_VER}"
 
 echo ""
 
+echo "Manifest:"
+echo "${MANIFEST_FILE}"
+
+echo ""
+
 echo "Release URL:"
 echo "${RELEASE_URL}"
 
@@ -320,11 +256,43 @@ echo ""
 
 
 # ============================================================
-# 清理旧版本
-#
-# 防止上一次构建残留旧版本文件。
+# 检查 manifest
 # ============================================================
 
+echo "============================================================"
+echo "Checking manifest"
+echo "============================================================"
+echo ""
+
+
+if [ ! -f "${MANIFEST_FILE}" ]; then
+
+    echo "ERROR: manifest not found:"
+    echo "${MANIFEST_FILE}"
+
+    echo ""
+
+    echo "Project files:"
+    find "${SCRIPT_DIR}" \
+        -maxdepth 2 \
+        -type f \
+        -print \
+        | sort
+
+    exit 1
+
+fi
+
+
+echo "Manifest found:"
+echo "${MANIFEST_FILE}"
+
+
+# ============================================================
+# 清理旧的二进制
+# ============================================================
+
+echo ""
 echo "============================================================"
 echo "Cleaning old dependencies"
 echo "============================================================"
@@ -358,12 +326,11 @@ echo ""
 
 if [ -f "${FNPACK_PATH}" ]; then
 
-    echo "fnpack already exists."
+    echo "fnpack already exists, skip download."
 
 else
 
     echo "Downloading fnpack..."
-
 
     case "$(uname -s)" in
 
@@ -380,18 +347,16 @@ else
 
                     ;;
 
-
                 aarch64)
 
                     FNPACK_BIN="fnpack-${FNPACK_VER}-linux-arm64"
 
                     ;;
 
-
                 *)
 
                     echo ""
-                    echo "ERROR: Unsupported Linux architecture:"
+                    echo "ERROR: Unsupported architecture:"
                     echo "${ARCH}"
                     echo ""
 
@@ -408,16 +373,6 @@ else
 
 
             chmod +x "${FNPACK_PATH}"
-
-            ;;
-
-
-        MINGW*|MSYS*|CYGWIN*)
-
-            download_file \
-                "https://static2.fnnas.com/fnpack/fnpack-${FNPACK_VER}-windows-amd64" \
-                "${SCRIPT_DIR}/fnpack.exe"
-
 
             ;;
 
@@ -443,17 +398,9 @@ chmod +x "${FNPACK_PATH}"
 
 
 echo ""
-echo "fnpack file:"
+echo "fnpack:"
 ls -lh "${FNPACK_PATH}"
 
-
-# ------------------------------------------------------------
-# fnpack 1.2.3 不支持：
-#
-#   fnpack --version
-#
-# 因此这里只使用 help。
-# ------------------------------------------------------------
 
 echo ""
 echo "fnpack help:"
@@ -462,7 +409,7 @@ echo "fnpack help:"
 
 
 # ============================================================
-# 2. x86_64 Vulkan
+# 2. llama.cpp x64 Vulkan
 # ============================================================
 
 echo ""
@@ -491,7 +438,7 @@ download_file \
 
 
 echo ""
-echo "Checking x86_64 archive..."
+echo "Checking archive..."
 
 
 tar \
@@ -500,7 +447,7 @@ tar \
 
 
 echo ""
-echo "Extracting x86_64 Vulkan..."
+echo "Extracting..."
 
 
 tar \
@@ -508,10 +455,6 @@ tar \
     --strip-components=1 \
     -C "${X64_DIR}"
 
-
-# ------------------------------------------------------------
-# x86_64 必需文件
-# ------------------------------------------------------------
 
 check_file "${X64_DIR}/llama-server"
 
@@ -526,12 +469,14 @@ echo "x86_64 Vulkan: OK"
 
 echo ""
 
-echo "x86_64 file count:"
-find "${X64_DIR}" -type f | wc -l
+echo "Files:"
+find "${X64_DIR}" \
+    -type f \
+    | wc -l
 
 
 # ============================================================
-# 3. ARM64 Vulkan
+# 3. llama.cpp ARM64 Vulkan
 # ============================================================
 
 echo ""
@@ -560,7 +505,7 @@ download_file \
 
 
 echo ""
-echo "Checking ARM64 archive..."
+echo "Checking archive..."
 
 
 tar \
@@ -569,7 +514,7 @@ tar \
 
 
 echo ""
-echo "Extracting ARM64 Vulkan..."
+echo "Extracting..."
 
 
 tar \
@@ -577,10 +522,6 @@ tar \
     --strip-components=1 \
     -C "${ARM64_DIR}"
 
-
-# ------------------------------------------------------------
-# ARM64 必需文件
-# ------------------------------------------------------------
 
 check_file "${ARM64_DIR}/llama-server"
 
@@ -595,8 +536,10 @@ echo "ARM64 Vulkan: OK"
 
 echo ""
 
-echo "ARM64 file count:"
-find "${ARM64_DIR}" -type f | wc -l
+echo "Files:"
+find "${ARM64_DIR}" \
+    -type f \
+    | wc -l
 
 
 # ============================================================
@@ -647,32 +590,27 @@ tar \
     -C "${WEBUI_DIR}"
 
 
-# ------------------------------------------------------------
-# WebUI 必需文件
-# ------------------------------------------------------------
-
 check_file "${WEBUI_DIR}/index.html"
 
 
-WEBUI_FILE_COUNT=$(
-    find "${WEBUI_DIR}" \
-        -type f \
-        | wc -l
-)
-
+echo ""
+echo "WebUI: OK"
 
 echo ""
-echo "WebUI file count:"
-echo "${WEBUI_FILE_COUNT}"
+
+echo "WebUI files:"
+find "${WEBUI_DIR}" \
+    -type f \
+    | wc -l
 
 
 # ============================================================
-# 查找 WebUI Bundle
+# WebUI Bundle
 # ============================================================
 
 echo ""
 echo "============================================================"
-echo "Detecting WebUI JavaScript bundle"
+echo "Detecting WebUI JavaScript"
 echo "============================================================"
 echo ""
 
@@ -680,10 +618,6 @@ echo ""
 BUNDLE_FILE=""
 
 
-# 优先寻找：
-#
-# bundle.xxxxx.js
-#
 while IFS= read -r file; do
 
     BUNDLE_FILE="${file}"
@@ -698,9 +632,6 @@ done < <(
         | sort
 )
 
-
-# 如果没有 bundle.*.js
-# 再寻找普通 JS。
 
 if [ -z "${BUNDLE_FILE}" ]; then
 
@@ -723,18 +654,12 @@ fi
 
 if [ -n "${BUNDLE_FILE}" ]; then
 
-    echo "WebUI bundle:"
+    echo "Bundle:"
     echo "${BUNDLE_FILE}"
-
-    echo ""
-
-    echo "Bundle size:"
-    ls -lh "${BUNDLE_FILE}"
 
 else
 
-    echo ""
-    echo "WARNING: No WebUI JavaScript bundle found."
+    echo "WARNING: WebUI JavaScript bundle not found."
 
 fi
 
@@ -745,34 +670,12 @@ fi
 
 echo ""
 echo "============================================================"
-echo "WebUI Chinese translation"
+echo "Applying Chinese WebUI translations"
 echo "============================================================"
 echo ""
 
 
-if [ -z "${BUNDLE_FILE}" ]; then
-
-    echo "No JavaScript bundle detected."
-
-    echo "Skipping translation."
-
-else
-
-    echo "Applying safe UI translations..."
-
-
-    # --------------------------------------------------------
-    # 备份
-    # --------------------------------------------------------
-
-    cp \
-        "${BUNDLE_FILE}" \
-        "${BUNDLE_FILE}.before-cn"
-
-
-    # --------------------------------------------------------
-    # Python UTF-8 翻译
-    # --------------------------------------------------------
+if [ -n "${BUNDLE_FILE}" ]; then
 
     python3 - "${BUNDLE_FILE}" <<'PY'
 
@@ -788,22 +691,11 @@ text = file.read_text(
 )
 
 
-# ============================================================
-# 翻译表
-#
-# 这里只替换完整字符串。
-#
-# 不进行普通英文单词全局替换。
-# ============================================================
-
 translations = {
-
-    # --------------------------------------------------------
-    # Chat
-    # --------------------------------------------------------
 
     "New Chat": "新建对话",
     "New Conversation": "新建对话",
+
     "Conversation": "对话",
     "Conversations": "对话",
 
@@ -812,6 +704,7 @@ translations = {
 
     "Send": "发送",
     "Stop": "停止",
+
     "Cancel": "取消",
     "Close": "关闭",
     "Open": "打开",
@@ -829,23 +722,15 @@ translations = {
     "Next": "下一步",
     "Previous": "上一步",
 
-    # --------------------------------------------------------
-    # Model
-    # --------------------------------------------------------
-
     "Model": "模型",
     "Models": "模型",
-    "Model Name": "模型名称",
 
+    "Model Name": "模型名称",
     "Model Settings": "模型设置",
 
     "Load Model": "加载模型",
     "Unload Model": "卸载模型",
     "Select Model": "选择模型",
-
-    # --------------------------------------------------------
-    # Prompt
-    # --------------------------------------------------------
 
     "Prompt": "提示词",
     "System Prompt": "系统提示词",
@@ -855,15 +740,7 @@ translations = {
     "User": "用户",
     "Assistant": "助手",
 
-    # --------------------------------------------------------
-    # Generation
-    # --------------------------------------------------------
-
     "Temperature": "温度",
-    "Top P": "Top P",
-    "Top K": "Top K",
-    "Min P": "Min P",
-
     "Context Size": "上下文长度",
     "Context Length": "上下文长度",
 
@@ -873,10 +750,6 @@ translations = {
     "Seed": "随机种子",
 
     "Repeat Penalty": "重复惩罚",
-
-    # --------------------------------------------------------
-    # Settings
-    # --------------------------------------------------------
 
     "Settings": "设置",
     "General": "常规",
@@ -889,10 +762,6 @@ translations = {
     "Dark": "深色",
     "Light": "浅色",
 
-    # --------------------------------------------------------
-    # Server
-    # --------------------------------------------------------
-
     "Server": "服务器",
     "Server Settings": "服务器设置",
 
@@ -903,10 +772,6 @@ translations = {
     "Host": "主机",
     "Port": "端口",
 
-    # --------------------------------------------------------
-    # File
-    # --------------------------------------------------------
-
     "File": "文件",
     "Files": "文件",
 
@@ -916,31 +781,13 @@ translations = {
     "Remove": "移除",
     "Browse": "浏览",
 
-    # --------------------------------------------------------
-    # Tools
-    # --------------------------------------------------------
-
     "Tool": "工具",
     "Tools": "工具",
-
-    "MCP": "MCP",
-
-    # --------------------------------------------------------
-    # Reasoning
-    # --------------------------------------------------------
 
     "Reasoning": "思考",
     "Thinking": "思考",
 
-    "Reasoning Content": "思考内容",
-
-    # --------------------------------------------------------
-    # UI
-    # --------------------------------------------------------
-
-    "Menu": "菜单",
     "Search": "搜索",
-
     "Refresh": "刷新",
     "Reload": "重新加载",
 
@@ -957,51 +804,28 @@ translations = {
 }
 
 
-# ============================================================
-# 替换
-# ============================================================
-
 count = 0
 
 
 for old, new in translations.items():
 
-    patterns = [
+    for quote in ('"', "'"):
 
-        f'"{old}"',
+        old_text = quote + old + quote
 
-        f"'{old}'",
+        new_text = quote + new + quote
 
-    ]
+        occurrences = text.count(old_text)
 
-
-    for pattern in patterns:
-
-        if pattern.startswith('"'):
-
-            replacement = f'"{new}"'
-
-        else:
-
-            replacement = f"'{new}'"
-
-
-        occurrences = text.count(pattern)
-
-
-        if occurrences > 0:
+        if occurrences:
 
             text = text.replace(
-                pattern,
-                replacement
+                old_text,
+                new_text
             )
 
             count += occurrences
 
-
-# ============================================================
-# 写回
-# ============================================================
 
 file.write_text(
     text,
@@ -1010,34 +834,20 @@ file.write_text(
 
 
 print(
-    f"Chinese translation replacements: {count}"
+    f"Chinese translations applied: {count}"
 )
 
 PY
 
+else
 
-    # --------------------------------------------------------
-    # 检查文件
-    # --------------------------------------------------------
-
-    check_file "${BUNDLE_FILE}"
-
-
-    # --------------------------------------------------------
-    # 删除备份
-    # --------------------------------------------------------
-
-    rm -f "${BUNDLE_FILE}.before-cn"
-
-
-    echo ""
-    echo "WebUI Chinese translation: OK"
+    echo "No WebUI bundle found, skipping translation."
 
 fi
 
 
 # ============================================================
-# 5. 设置版本信息
+# 5. Version / Manifest
 # ============================================================
 
 echo ""
@@ -1048,133 +858,39 @@ echo ""
 
 
 # ============================================================
-# 检查 manifest
-# ============================================================
-
-if [ ! -f "${MANIFEST_FILE}" ]; then
-
-    echo ""
-    echo "ERROR: manifest not found:"
-    echo "${MANIFEST_FILE}"
-    echo ""
-
-    exit 1
-
-fi
-
-
-echo "Manifest:"
-echo "${MANIFEST_FILE}"
-
-echo ""
-
-
-# ============================================================
-# 修改 manifest
+# 修改根目录 manifest
+#
+# 原始：
 #
 # version=__VERSION__
 #
-# 自动变成：
+# 修改：
 #
 # version=b10694
+#
 # ============================================================
 
 echo "Updating manifest version..."
 
-
-python3 \
-    "${MANIFEST_FILE}" \
-    "${LLAMA_CPP_VER}" \
-    <<'PY'
-
-import sys
-from pathlib import Path
-
-
-manifest = Path(sys.argv[1])
-
-version = sys.argv[2]
-
-
-text = manifest.read_text(
-    encoding="utf-8"
-)
-
-
-lines = text.splitlines()
-
-
-found = False
-
-
-for i, line in enumerate(lines):
-
-    if line.startswith("version="):
-
-        lines[i] = f"version={version}"
-
-        found = True
-
-        break
-
-
-if not found:
-
-    raise SystemExit(
-        "ERROR: version= line not found in manifest"
-    )
-
-
-manifest.write_text(
-    "\n".join(lines) + "\n",
-    encoding="utf-8"
-)
-
-
-print(
-    f"Manifest version updated: {version}"
-)
-
-PY
+sed -i \
+    -E "s/^version=.*/version=${LLAMA_CPP_VER}/" \
+    "${MANIFEST_FILE}"
 
 
 # ============================================================
-# 验证 manifest
+# 检查 manifest 是否存在 version
 # ============================================================
 
-MANIFEST_VERSION="$(
-    grep '^version=' "${MANIFEST_FILE}" \
-    | head -1 \
-    | cut -d'=' -f2-
-)"
-
-
-if [ -z "${MANIFEST_VERSION}" ]; then
-
-    echo ""
-    echo "ERROR: Unable to read manifest version."
-    echo ""
-
-    exit 1
-
-fi
-
-
-if [ "${MANIFEST_VERSION}" != "${LLAMA_CPP_VER}" ]; then
+if ! grep -q "^version=${LLAMA_CPP_VER}$" "${MANIFEST_FILE}"; then
 
     echo ""
     echo "============================================================"
-    echo "ERROR: Manifest version mismatch"
+    echo "ERROR: Failed to update manifest version"
     echo "============================================================"
     echo ""
 
-    echo "Expected:"
-    echo "${LLAMA_CPP_VER}"
-
-    echo ""
-
-    echo "Actual:"
-    echo "${MANIFEST_VERSION}"
+    echo "Current manifest:"
+    cat "${MANIFEST_FILE}"
 
     echo ""
 
@@ -1185,16 +901,18 @@ fi
 
 echo ""
 echo "Manifest version:"
-echo "version=${MANIFEST_VERSION}"
+grep "^version=" "${MANIFEST_FILE}"
 
 
 # ============================================================
 # 写入 app/VERSION
 # ============================================================
 
-cat > "${VERSION_FILE}" <<EOF
-${LLAMA_CPP_VER}
-EOF
+echo ""
+echo "Updating app/VERSION..."
+
+
+printf '%s\n' "${LLAMA_CPP_VER}" > "${VERSION_FILE}"
 
 
 check_file "${VERSION_FILE}"
@@ -1216,52 +934,58 @@ echo "============================================================"
 echo ""
 
 
-# ------------------------------------------------------------
-# fnpack
-# ------------------------------------------------------------
+echo "===== Manifest ====="
 
-echo "===== fnpack ====="
+grep "^appname=" "${MANIFEST_FILE}" || true
 
-check_file "${FNPACK_PATH}"
+grep "^version=" "${MANIFEST_FILE}" || true
 
-ls -lh "${FNPACK_PATH}"
+grep "^display_name=" "${MANIFEST_FILE}" || true
 
+grep "^maintainer=" "${MANIFEST_FILE}" || true
 
-# ------------------------------------------------------------
-# x86_64
-# ------------------------------------------------------------
+grep "^distributor=" "${MANIFEST_FILE}" || true
+
 
 echo ""
-echo "===== x86_64 Vulkan ====="
+echo "===== app/VERSION ====="
+
+cat "${VERSION_FILE}"
+
+
+echo ""
+echo "===== x86_64 ====="
 
 check_file "${X64_DIR}/llama-server"
 
 check_file "${X64_DIR}/libggml-vulkan.so"
 
-ls -lh \
-    "${X64_DIR}/llama-server" \
-    "${X64_DIR}/libggml-vulkan.so"
 
-
-# ------------------------------------------------------------
-# ARM64
-# ------------------------------------------------------------
+echo "llama-server:"
+ls -lh "${X64_DIR}/llama-server"
 
 echo ""
-echo "===== ARM64 Vulkan ====="
+
+echo "libggml-vulkan.so:"
+ls -lh "${X64_DIR}/libggml-vulkan.so"
+
+
+echo ""
+echo "===== ARM64 ====="
 
 check_file "${ARM64_DIR}/llama-server"
 
 check_file "${ARM64_DIR}/libggml-vulkan.so"
 
-ls -lh \
-    "${ARM64_DIR}/llama-server" \
-    "${ARM64_DIR}/libggml-vulkan.so"
 
+echo "llama-server:"
+ls -lh "${ARM64_DIR}/llama-server"
 
-# ------------------------------------------------------------
-# WebUI
-# ------------------------------------------------------------
+echo ""
+
+echo "libggml-vulkan.so:"
+ls -lh "${ARM64_DIR}/libggml-vulkan.so"
+
 
 echo ""
 echo "===== WebUI ====="
@@ -1269,24 +993,6 @@ echo "===== WebUI ====="
 check_file "${WEBUI_DIR}/index.html"
 
 ls -lh "${WEBUI_DIR}/index.html"
-
-
-# ------------------------------------------------------------
-# Manifest
-# ------------------------------------------------------------
-
-echo ""
-echo "===== Manifest ====="
-
-grep '^appname=' "${MANIFEST_FILE}" || true
-
-grep '^version=' "${MANIFEST_FILE}" || true
-
-grep '^display_name=' "${MANIFEST_FILE}" || true
-
-grep '^maintainer=' "${MANIFEST_FILE}" || true
-
-grep '^distributor=' "${MANIFEST_FILE}" || true
 
 
 # ============================================================
@@ -1311,19 +1017,14 @@ echo "ARM64 Vulkan      : OK"
 
 echo "WebUI             : OK"
 
-echo "Manifest version  : ${MANIFEST_VERSION}"
+echo "Manifest          : OK"
 
-echo "Chinese UI        : OK"
-
-echo ""
-
-echo "Manifest:"
-echo "${MANIFEST_FILE}"
+echo "app/VERSION       : OK"
 
 echo ""
 
-echo "Version:"
-echo "${VERSION_FILE}"
+echo "Manifest version:"
+grep "^version=" "${MANIFEST_FILE}"
 
 echo ""
 
@@ -1331,4 +1032,3 @@ echo "Next step:"
 echo "./build.sh"
 
 echo ""
-
