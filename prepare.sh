@@ -4,23 +4,32 @@ bash
 # ============================================================
 # llama.cpp for fnOS - Prepare Script
 #
-# 自动下载并准备 FPK 所需依赖
+# 功能：
 #
-# 依赖：
-#   1. fnpack
-#   2. llama.cpp x86_64 Vulkan
-#   3. llama.cpp ARM64 Vulkan
-#   4. llama.cpp WebUI
+# 1. 下载 fnpack
+# 2. 下载 llama.cpp x86_64 Vulkan
+# 3. 下载 llama.cpp ARM64 Vulkan
+# 4. 下载 llama.cpp WebUI
+# 5. 自动设置 app/VERSION
+# 6. 自动修改 app/manifest 版本号
+# 7. 自动进行 WebUI 中文化
+# 8. 完整检查依赖
 #
-# llama.cpp 版本：
+# llama.cpp 版本格式：
 #
 #   b10694
 #   b10695
 #   b10696
 #
-# 版本由 GitHub Actions 的 LLAMA_CPP_VER 提供。
+# 不使用：
+#
+#   v0.3.0
+#   0.3.0
+#
+# LLAMA_CPP_VER 由 GitHub Actions 提供。
 #
 # ============================================================
+
 
 set -euo pipefail
 
@@ -44,6 +53,10 @@ WEBUI_DIR="${APP_DIR}/webui"
 TMP_DIR="${SCRIPT_DIR}/.prepare-tmp"
 
 FNPACK_PATH="${SCRIPT_DIR}/fnpack"
+
+MANIFEST_FILE="${APP_DIR}/manifest"
+
+VERSION_FILE="${APP_DIR}/VERSION"
 
 
 # ============================================================
@@ -71,29 +84,33 @@ FNPACK_VER="${FNPACK_VER:-1.2.3}"
 # ============================================================
 # 检查 llama.cpp 版本格式
 #
-# 只接受：
+# llama.cpp 当前 Release 使用：
+#
+#   bXXXXX
+#
+# 例如：
 #
 #   b10694
-#   b10695
-#
-# 不接受：
-#
-#   v0.3.0
-#   0.3.0
-#   master
 #
 # ============================================================
 
 if ! printf '%s\n' "${LLAMA_CPP_VER}" | grep -Eq '^b[0-9]+$'; then
 
     echo ""
-    echo "ERROR: Invalid llama.cpp version:"
+    echo "============================================================"
+    echo "ERROR: Invalid llama.cpp version"
+    echo "============================================================"
     echo ""
-    echo "  ${LLAMA_CPP_VER}"
+    echo "Received:"
+    echo "${LLAMA_CPP_VER}"
     echo ""
     echo "Expected format:"
+    echo "bXXXXX"
     echo ""
-    echo "  bXXXXX"
+    echo "Examples:"
+    echo "b10694"
+    echo "b10695"
+    echo "b10696"
     echo ""
 
     exit 1
@@ -102,7 +119,7 @@ fi
 
 
 # ============================================================
-# GitHub Release URL
+# Release URL
 # ============================================================
 
 RELEASE_URL="https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_CPP_VER}"
@@ -140,16 +157,19 @@ download_file() {
 
     local output="$2"
 
+
     echo ""
     echo "------------------------------------------------------------"
     echo "Downloading"
     echo "------------------------------------------------------------"
     echo ""
+    echo "URL:"
     echo "${url}"
     echo ""
     echo "Output:"
     echo "${output}"
     echo ""
+
 
     curl \
         -fL \
@@ -161,21 +181,46 @@ download_file() {
         -o "${output}" \
         "${url}"
 
+
+    if [ ! -f "${output}" ]; then
+
+        echo ""
+        echo "ERROR: Download failed:"
+        echo "${output}"
+        echo ""
+
+        exit 1
+
+    fi
+
+
+    if [ ! -s "${output}" ]; then
+
+        echo ""
+        echo "ERROR: Downloaded file is empty:"
+        echo "${output}"
+        echo ""
+
+        exit 1
+
+    fi
+
 }
 
 
 # ============================================================
-# 检查文件
+# 检查普通文件
 # ============================================================
 
 check_file() {
 
     local file="$1"
 
+
     if [ ! -f "${file}" ]; then
 
         echo ""
-        echo "ERROR: File not found:"
+        echo "ERROR: Required file not found:"
         echo "${file}"
         echo ""
 
@@ -187,7 +232,7 @@ check_file() {
     if [ ! -s "${file}" ]; then
 
         echo ""
-        echo "ERROR: File is empty:"
+        echo "ERROR: Required file is empty:"
         echo "${file}"
         echo ""
 
@@ -223,6 +268,8 @@ echo ""
 
 # ============================================================
 # 清理旧版本
+#
+# 防止上一次构建残留旧版本文件。
 # ============================================================
 
 echo "============================================================"
@@ -251,7 +298,7 @@ mkdir -p "${WEBUI_DIR}"
 
 echo ""
 echo "============================================================"
-echo "[1/4] fnpack"
+echo "[1/5] fnpack"
 echo "============================================================"
 echo ""
 
@@ -264,11 +311,13 @@ else
 
     echo "Downloading fnpack..."
 
+
     case "$(uname -s)" in
 
         Linux)
 
             ARCH="$(uname -m)"
+
 
             case "${ARCH}" in
 
@@ -278,11 +327,13 @@ else
 
                     ;;
 
+
                 aarch64)
 
                     FNPACK_BIN="fnpack-${FNPACK_VER}-linux-arm64"
 
                     ;;
+
 
                 *)
 
@@ -314,6 +365,7 @@ else
                 "https://static2.fnnas.com/fnpack/fnpack-${FNPACK_VER}-windows-amd64" \
                 "${SCRIPT_DIR}/fnpack.exe"
 
+
             ;;
 
         *)
@@ -334,25 +386,20 @@ fi
 
 check_file "${FNPACK_PATH}"
 
-
 chmod +x "${FNPACK_PATH}"
 
 
 echo ""
-echo "fnpack:"
+echo "fnpack file:"
 ls -lh "${FNPACK_PATH}"
 
 
 # ------------------------------------------------------------
-# 注意：
-#
 # fnpack 1.2.3 不支持：
 #
 #   fnpack --version
 #
-# 所以这里不再调用 --version。
-#
-# 使用 help 检查程序是否可以正常运行。
+# 因此这里只使用 help。
 # ------------------------------------------------------------
 
 echo ""
@@ -367,7 +414,7 @@ echo "fnpack help:"
 
 echo ""
 echo "============================================================"
-echo "[2/4] llama.cpp x86_64 Vulkan"
+echo "[2/5] llama.cpp x86_64 Vulkan"
 echo "============================================================"
 echo ""
 
@@ -378,11 +425,6 @@ X64_URL="${RELEASE_URL}/${X64_ASSET}"
 
 X64_TMP="${TMP_DIR}/${X64_ASSET}"
 
-
-echo "Version:"
-echo "${LLAMA_CPP_VER}"
-
-echo ""
 
 echo "Asset:"
 echo "${X64_ASSET}"
@@ -395,11 +437,9 @@ download_file \
     "${X64_TMP}"
 
 
-check_file "${X64_TMP}"
-
-
 echo ""
-echo "Checking archive..."
+echo "Checking x86_64 archive..."
+
 
 tar \
     -tzf "${X64_TMP}" \
@@ -416,39 +456,13 @@ tar \
     -C "${X64_DIR}"
 
 
-echo ""
-echo "x86_64 files:"
-
-find "${X64_DIR}" \
-    -type f \
-    -print \
-    | sort
-
-
 # ------------------------------------------------------------
 # x86_64 必需文件
 # ------------------------------------------------------------
 
-if [ ! -f "${X64_DIR}/llama-server" ]; then
+check_file "${X64_DIR}/llama-server"
 
-    echo ""
-    echo "ERROR: x86_64 llama-server not found."
-    echo ""
-
-    exit 1
-
-fi
-
-
-if [ ! -f "${X64_DIR}/libggml-vulkan.so" ]; then
-
-    echo ""
-    echo "ERROR: x86_64 libggml-vulkan.so not found."
-    echo ""
-
-    exit 1
-
-fi
+check_file "${X64_DIR}/libggml-vulkan.so"
 
 
 chmod +x "${X64_DIR}/llama-server"
@@ -457,6 +471,11 @@ chmod +x "${X64_DIR}/llama-server"
 echo ""
 echo "x86_64 Vulkan: OK"
 
+echo ""
+
+echo "x86_64 file count:"
+find "${X64_DIR}" -type f | wc -l
+
 
 # ============================================================
 # 3. ARM64 Vulkan
@@ -464,7 +483,7 @@ echo "x86_64 Vulkan: OK"
 
 echo ""
 echo "============================================================"
-echo "[3/4] llama.cpp ARM64 Vulkan"
+echo "[3/5] llama.cpp ARM64 Vulkan"
 echo "============================================================"
 echo ""
 
@@ -475,11 +494,6 @@ ARM64_URL="${RELEASE_URL}/${ARM64_ASSET}"
 
 ARM64_TMP="${TMP_DIR}/${ARM64_ASSET}"
 
-
-echo "Version:"
-echo "${LLAMA_CPP_VER}"
-
-echo ""
 
 echo "Asset:"
 echo "${ARM64_ASSET}"
@@ -492,11 +506,9 @@ download_file \
     "${ARM64_TMP}"
 
 
-check_file "${ARM64_TMP}"
-
-
 echo ""
-echo "Checking archive..."
+echo "Checking ARM64 archive..."
+
 
 tar \
     -tzf "${ARM64_TMP}" \
@@ -513,39 +525,13 @@ tar \
     -C "${ARM64_DIR}"
 
 
-echo ""
-echo "ARM64 files:"
-
-find "${ARM64_DIR}" \
-    -type f \
-    -print \
-    | sort
-
-
 # ------------------------------------------------------------
 # ARM64 必需文件
 # ------------------------------------------------------------
 
-if [ ! -f "${ARM64_DIR}/llama-server" ]; then
+check_file "${ARM64_DIR}/llama-server"
 
-    echo ""
-    echo "ERROR: ARM64 llama-server not found."
-    echo ""
-
-    exit 1
-
-fi
-
-
-if [ ! -f "${ARM64_DIR}/libggml-vulkan.so" ]; then
-
-    echo ""
-    echo "ERROR: ARM64 libggml-vulkan.so not found."
-    echo ""
-
-    exit 1
-
-fi
+check_file "${ARM64_DIR}/libggml-vulkan.so"
 
 
 chmod +x "${ARM64_DIR}/llama-server"
@@ -554,6 +540,11 @@ chmod +x "${ARM64_DIR}/llama-server"
 echo ""
 echo "ARM64 Vulkan: OK"
 
+echo ""
+
+echo "ARM64 file count:"
+find "${ARM64_DIR}" -type f | wc -l
+
 
 # ============================================================
 # 4. WebUI
@@ -561,7 +552,7 @@ echo "ARM64 Vulkan: OK"
 
 echo ""
 echo "============================================================"
-echo "[4/4] llama.cpp WebUI"
+echo "[4/5] llama.cpp WebUI"
 echo "============================================================"
 echo ""
 
@@ -572,11 +563,6 @@ WEBUI_URL="${RELEASE_URL}/${WEBUI_ASSET}"
 
 WEBUI_TMP="${TMP_DIR}/${WEBUI_ASSET}"
 
-
-echo "Version:"
-echo "${LLAMA_CPP_VER}"
-
-echo ""
 
 echo "Asset:"
 echo "${WEBUI_ASSET}"
@@ -589,11 +575,9 @@ download_file \
     "${WEBUI_TMP}"
 
 
-check_file "${WEBUI_TMP}"
-
-
 echo ""
 echo "Checking WebUI archive..."
+
 
 tar \
     -tzf "${WEBUI_TMP}" \
@@ -611,99 +595,99 @@ tar \
 
 
 # ------------------------------------------------------------
-# WebUI index
+# WebUI 必需文件
 # ------------------------------------------------------------
 
-if [ ! -f "${WEBUI_DIR}/index.html" ]; then
+check_file "${WEBUI_DIR}/index.html"
 
-    echo ""
-    echo "ERROR: WebUI index.html not found."
-    echo ""
 
-    exit 1
-
-fi
+WEBUI_FILE_COUNT=$(
+    find "${WEBUI_DIR}" \
+        -type f \
+        | wc -l
+)
 
 
 echo ""
-echo "WebUI index:"
-ls -lh "${WEBUI_DIR}/index.html"
+echo "WebUI file count:"
+echo "${WEBUI_FILE_COUNT}"
 
 
 # ============================================================
-# 查找 WebUI JS Bundle
+# 查找 WebUI Bundle
 # ============================================================
 
 echo ""
 echo "============================================================"
-echo "Detecting WebUI bundle"
+echo "Detecting WebUI JavaScript bundle"
 echo "============================================================"
 echo ""
 
-
-BUNDLE_COUNT=0
 
 BUNDLE_FILE=""
 
 
+# 优先寻找：
+#
+# bundle.xxxxx.js
+#
 while IFS= read -r file; do
 
-    BUNDLE_COUNT=$((BUNDLE_COUNT + 1))
+    BUNDLE_FILE="${file}"
 
-    if [ -z "${BUNDLE_FILE}" ]; then
-
-        BUNDLE_FILE="${file}"
-
-    fi
+    break
 
 done < <(
     find "${WEBUI_DIR}" \
         -type f \
-        \( \
-            -name 'bundle.*.js' \
-            -o \
-            -name '*.js' \
-        \) \
+        -name 'bundle.*.js' \
         -print \
         | sort
 )
 
 
-echo "JavaScript files found:"
-echo "${BUNDLE_COUNT}"
+# 如果没有 bundle.*.js
+# 再寻找普通 JS。
+
+if [ -z "${BUNDLE_FILE}" ]; then
+
+    while IFS= read -r file; do
+
+        BUNDLE_FILE="${file}"
+
+        break
+
+    done < <(
+        find "${WEBUI_DIR}" \
+            -type f \
+            -name '*.js' \
+            -print \
+            | sort
+    )
+
+fi
 
 
 if [ -n "${BUNDLE_FILE}" ]; then
 
-    echo ""
-    echo "Primary bundle:"
+    echo "WebUI bundle:"
     echo "${BUNDLE_FILE}"
 
     echo ""
+
     echo "Bundle size:"
     ls -lh "${BUNDLE_FILE}"
 
 else
 
     echo ""
-    echo "WARNING: No JavaScript bundle detected."
+    echo "WARNING: No WebUI JavaScript bundle found."
 
 fi
 
 
 # ============================================================
 # WebUI 中文化
-#
-# 注意：
-#
-# 官方 llama-ui 当前是 SvelteKit WebUI。
-#
-# 为避免破坏新版压缩 JS：
-#
-# 这里只替换“明确的 UI 文本”。
-#
-# 不对普通英文单词做全局替换。
-#
 # ============================================================
 
 echo ""
@@ -715,17 +699,17 @@ echo ""
 
 if [ -z "${BUNDLE_FILE}" ]; then
 
-    echo "No bundle found."
-    echo "Skip translation."
+    echo "No JavaScript bundle detected."
+
+    echo "Skipping translation."
 
 else
 
-    echo "Translating UI strings..."
-    echo ""
+    echo "Applying safe UI translations..."
 
 
     # --------------------------------------------------------
-    # 创建备份
+    # 备份
     # --------------------------------------------------------
 
     cp \
@@ -734,41 +718,42 @@ else
 
 
     # --------------------------------------------------------
-    # 中文翻译函数
-    #
-    # 只处理常见 UI 字符串。
-    #
-    # 使用 Python 而不是 sed：
-    #
-    # 1. 支持 UTF-8
-    # 2. 避免 sed 在不同 Linux 环境下行为差异
-    # 3. 可以安全处理大文件
+    # Python UTF-8 翻译
     # --------------------------------------------------------
 
     python3 - "${BUNDLE_FILE}" <<'PY'
+
 import sys
 from pathlib import Path
 
+
 file = Path(sys.argv[1])
 
-text = file.read_text(encoding="utf-8")
+
+text = file.read_text(
+    encoding="utf-8"
+)
+
 
 # ============================================================
-# 中文翻译表
+# 翻译表
 #
-# 这里只放明确的 UI 文本。
+# 这里只替换完整字符串。
+#
+# 不进行普通英文单词全局替换。
 # ============================================================
 
 translations = {
 
-    # -----------------------------
-    # 基础
-    # -----------------------------
+    # --------------------------------------------------------
+    # Chat
+    # --------------------------------------------------------
 
     "New Chat": "新建对话",
     "New Conversation": "新建对话",
     "Conversation": "对话",
     "Conversations": "对话",
+
     "Chat": "聊天",
     "Chats": "聊天",
 
@@ -778,34 +763,36 @@ translations = {
     "Close": "关闭",
     "Open": "打开",
 
-    "Save": "保存",
-    "Saved": "已保存",
+    "Clear": "清空",
     "Delete": "删除",
     "Edit": "编辑",
-    "Clear": "清空",
-    "Reset": "重置",
+
+    "Save": "保存",
+    "Saved": "已保存",
 
     "Confirm": "确认",
+
     "Back": "返回",
     "Next": "下一步",
     "Previous": "上一步",
 
-    # -----------------------------
+    # --------------------------------------------------------
     # Model
-    # -----------------------------
+    # --------------------------------------------------------
 
     "Model": "模型",
     "Models": "模型",
-    "Load Model": "加载模型",
-    "Unload Model": "卸载模型",
-    "Select Model": "选择模型",
     "Model Name": "模型名称",
 
     "Model Settings": "模型设置",
 
-    # -----------------------------
+    "Load Model": "加载模型",
+    "Unload Model": "卸载模型",
+    "Select Model": "选择模型",
+
+    # --------------------------------------------------------
     # Prompt
-    # -----------------------------
+    # --------------------------------------------------------
 
     "Prompt": "提示词",
     "System Prompt": "系统提示词",
@@ -815,9 +802,9 @@ translations = {
     "User": "用户",
     "Assistant": "助手",
 
-    # -----------------------------
+    # --------------------------------------------------------
     # Generation
-    # -----------------------------
+    # --------------------------------------------------------
 
     "Temperature": "温度",
     "Top P": "Top P",
@@ -834,27 +821,28 @@ translations = {
 
     "Repeat Penalty": "重复惩罚",
 
-    # -----------------------------
+    # --------------------------------------------------------
     # Settings
-    # -----------------------------
+    # --------------------------------------------------------
 
     "Settings": "设置",
     "General": "常规",
     "Advanced": "高级",
+
     "Appearance": "外观",
     "Theme": "主题",
     "Language": "语言",
 
     "Dark": "深色",
     "Light": "浅色",
-    "System": "跟随系统",
 
-    # -----------------------------
+    # --------------------------------------------------------
     # Server
-    # -----------------------------
+    # --------------------------------------------------------
 
     "Server": "服务器",
     "Server Settings": "服务器设置",
+
     "Connection": "连接",
     "Connect": "连接",
     "Disconnect": "断开连接",
@@ -862,39 +850,44 @@ translations = {
     "Host": "主机",
     "Port": "端口",
 
-    # -----------------------------
+    # --------------------------------------------------------
     # File
-    # -----------------------------
+    # --------------------------------------------------------
 
     "File": "文件",
     "Files": "文件",
+
     "Upload": "上传",
     "Download": "下载",
+
     "Remove": "移除",
     "Browse": "浏览",
 
-    # -----------------------------
-    # MCP
-    # -----------------------------
+    # --------------------------------------------------------
+    # Tools
+    # --------------------------------------------------------
+
+    "Tool": "工具",
+    "Tools": "工具",
 
     "MCP": "MCP",
-    "Tools": "工具",
-    "Tool": "工具",
 
-    # -----------------------------
+    # --------------------------------------------------------
     # Reasoning
-    # -----------------------------
+    # --------------------------------------------------------
 
     "Reasoning": "思考",
     "Thinking": "思考",
+
     "Reasoning Content": "思考内容",
 
-    # -----------------------------
+    # --------------------------------------------------------
     # UI
-    # -----------------------------
+    # --------------------------------------------------------
 
     "Menu": "菜单",
     "Search": "搜索",
+
     "Refresh": "刷新",
     "Reload": "重新加载",
 
@@ -903,6 +896,7 @@ translations = {
     "About": "关于",
 
     "Loading": "加载中",
+
     "Error": "错误",
     "Warning": "警告",
     "Success": "成功",
@@ -911,73 +905,69 @@ translations = {
 
 
 # ============================================================
-# 替换策略
-#
-# 只替换 JSON/JS 中作为完整字符串出现的文本。
-#
-# 同时处理：
-#
-#   "Settings"
-#   'Settings'
-#
-# 避免：
-#
-#   settings
-#   SettingsManager
-#   settings_url
-#
-# 被误修改。
+# 替换
 # ============================================================
 
-replacements = 0
+count = 0
+
 
 for old, new in translations.items():
 
     patterns = [
+
         f'"{old}"',
+
         f"'{old}'",
+
     ]
+
 
     for pattern in patterns:
 
-        replacement = (
-            '"' + new + '"'
-            if pattern.startswith('"')
-            else "'" + new + "'"
-        )
+        if pattern.startswith('"'):
 
-        count = text.count(pattern)
+            replacement = f'"{new}"'
 
-        if count:
-            text = text.replace(pattern, replacement)
-            replacements += count
+        else:
+
+            replacement = f"'{new}'"
 
 
-file.write_text(text, encoding="utf-8")
+        occurrences = text.count(pattern)
 
-print(f"Chinese translation replacements: {replacements}")
+
+        if occurrences > 0:
+
+            text = text.replace(
+                pattern,
+                replacement
+            )
+
+            count += occurrences
+
+
+# ============================================================
+# 写回
+# ============================================================
+
+file.write_text(
+    text,
+    encoding="utf-8"
+)
+
+
+print(
+    f"Chinese translation replacements: {count}"
+)
 
 PY
 
 
     # --------------------------------------------------------
-    # 检查 JS 是否仍然存在
+    # 检查文件
     # --------------------------------------------------------
 
-    if [ ! -s "${BUNDLE_FILE}" ]; then
-
-        echo ""
-        echo "ERROR: WebUI bundle became empty."
-
-        echo "Restoring original bundle..."
-
-        mv \
-            "${BUNDLE_FILE}.before-cn" \
-            "${BUNDLE_FILE}"
-
-        exit 1
-
-    fi
+    check_file "${BUNDLE_FILE}"
 
 
     # --------------------------------------------------------
@@ -988,69 +978,177 @@ PY
 
 
     echo ""
-    echo "WebUI translation completed."
+    echo "WebUI Chinese translation: OK"
 
 fi
 
 
 # ============================================================
-# WebUI 文件统计
+# 5. 设置版本信息
 # ============================================================
 
 echo ""
 echo "============================================================"
-echo "WebUI verification"
+echo "[5/5] Version and manifest"
 echo "============================================================"
 echo ""
 
 
-WEBUI_FILE_COUNT=$(
-    find "${WEBUI_DIR}" \
-        -type f \
-        | wc -l
+# ============================================================
+# 检查 manifest
+# ============================================================
+
+if [ ! -f "${MANIFEST_FILE}" ]; then
+
+    echo ""
+    echo "ERROR: manifest not found:"
+    echo "${MANIFEST_FILE}"
+    echo ""
+
+    exit 1
+
+fi
+
+
+echo "Manifest:"
+echo "${MANIFEST_FILE}"
+
+echo ""
+
+
+# ============================================================
+# 修改 manifest
+#
+# version=__VERSION__
+#
+# 自动变成：
+#
+# version=b10694
+# ============================================================
+
+echo "Updating manifest version..."
+
+
+python3 \
+    "${MANIFEST_FILE}" \
+    "${LLAMA_CPP_VER}" \
+    <<'PY'
+
+import sys
+from pathlib import Path
+
+
+manifest = Path(sys.argv[1])
+
+version = sys.argv[2]
+
+
+text = manifest.read_text(
+    encoding="utf-8"
 )
 
 
-echo "WebUI file count:"
-echo "${WEBUI_FILE_COUNT}"
+lines = text.splitlines()
 
 
-echo ""
+found = False
 
-echo "WebUI structure:"
 
-find "${WEBUI_DIR}" \
-    -maxdepth 3 \
-    -type f \
-    -print \
-    | sort \
-    | head -200
+for i, line in enumerate(lines):
+
+    if line.startswith("version="):
+
+        lines[i] = f"version={version}"
+
+        found = True
+
+        break
+
+
+if not found:
+
+    raise SystemExit(
+        "ERROR: version= line not found in manifest"
+    )
+
+
+manifest.write_text(
+    "\n".join(lines) + "\n",
+    encoding="utf-8"
+)
+
+
+print(
+    f"Manifest version updated: {version}"
+)
+
+PY
 
 
 # ============================================================
-# 保存版本信息
+# 验证 manifest
 # ============================================================
 
+MANIFEST_VERSION="$(
+    grep '^version=' "${MANIFEST_FILE}" \
+    | head -1 \
+    | cut -d'=' -f2-
+)"
+
+
+if [ -z "${MANIFEST_VERSION}" ]; then
+
+    echo ""
+    echo "ERROR: Unable to read manifest version."
+    echo ""
+
+    exit 1
+
+fi
+
+
+if [ "${MANIFEST_VERSION}" != "${LLAMA_CPP_VER}" ]; then
+
+    echo ""
+    echo "============================================================"
+    echo "ERROR: Manifest version mismatch"
+    echo "============================================================"
+    echo ""
+
+    echo "Expected:"
+    echo "${LLAMA_CPP_VER}"
+
+    echo ""
+
+    echo "Actual:"
+    echo "${MANIFEST_VERSION}"
+
+    echo ""
+
+    exit 1
+
+fi
+
+
 echo ""
-echo "============================================================"
-echo "Saving version information"
-echo "============================================================"
-echo ""
+echo "Manifest version:"
+echo "version=${MANIFEST_VERSION}"
 
 
-VERSION_FILE="${APP_DIR}/VERSION"
-
+# ============================================================
+# 写入 app/VERSION
+# ============================================================
 
 cat > "${VERSION_FILE}" <<EOF
-LLAMA_CPP_VER=${LLAMA_CPP_VER}
-FNPACK_VER=${FNPACK_VER}
+${LLAMA_CPP_VER}
 EOF
 
 
-echo "Created:"
-echo "${VERSION_FILE}"
+check_file "${VERSION_FILE}"
 
 
+echo ""
+echo "app/VERSION:"
 cat "${VERSION_FILE}"
 
 
@@ -1071,6 +1169,8 @@ echo ""
 
 echo "===== fnpack ====="
 
+check_file "${FNPACK_PATH}"
+
 ls -lh "${FNPACK_PATH}"
 
 
@@ -1080,6 +1180,10 @@ ls -lh "${FNPACK_PATH}"
 
 echo ""
 echo "===== x86_64 Vulkan ====="
+
+check_file "${X64_DIR}/llama-server"
+
+check_file "${X64_DIR}/libggml-vulkan.so"
 
 ls -lh \
     "${X64_DIR}/llama-server" \
@@ -1093,6 +1197,10 @@ ls -lh \
 echo ""
 echo "===== ARM64 Vulkan ====="
 
+check_file "${ARM64_DIR}/llama-server"
+
+check_file "${ARM64_DIR}/libggml-vulkan.so"
+
 ls -lh \
     "${ARM64_DIR}/llama-server" \
     "${ARM64_DIR}/libggml-vulkan.so"
@@ -1105,24 +1213,27 @@ ls -lh \
 echo ""
 echo "===== WebUI ====="
 
-ls -lh \
-    "${WEBUI_DIR}/index.html"
+check_file "${WEBUI_DIR}/index.html"
+
+ls -lh "${WEBUI_DIR}/index.html"
 
 
 # ------------------------------------------------------------
-# 版本
+# Manifest
 # ------------------------------------------------------------
 
 echo ""
-echo "===== Version ====="
+echo "===== Manifest ====="
 
-echo "llama.cpp:"
-echo "${LLAMA_CPP_VER}"
+grep '^appname=' "${MANIFEST_FILE}" || true
 
-echo ""
+grep '^version=' "${MANIFEST_FILE}" || true
 
-echo "fnpack:"
-echo "${FNPACK_VER}"
+grep '^display_name=' "${MANIFEST_FILE}" || true
+
+grep '^maintainer=' "${MANIFEST_FILE}" || true
+
+grep '^distributor=' "${MANIFEST_FILE}" || true
 
 
 # ============================================================
@@ -1147,14 +1258,19 @@ echo "ARM64 Vulkan      : OK"
 
 echo "WebUI             : OK"
 
+echo "Manifest version  : ${MANIFEST_VERSION}"
+
+echo "Chinese UI        : OK"
+
 echo ""
 
-echo "Chinese UI        : PATCHED"
+echo "Manifest:"
+echo "${MANIFEST_FILE}"
 
 echo ""
 
-echo "Output:"
-echo "${APP_DIR}"
+echo "Version:"
+echo "${VERSION_FILE}"
 
 echo ""
 
