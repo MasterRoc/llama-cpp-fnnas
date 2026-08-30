@@ -1,7 +1,7 @@
 appname=llama-cpp
 version=__VERSION__
 display_name=llama.cpp
-desc=Local 本地LLM推理服务器基于llama.cpp与Vulkan GPU加速。支持GGUF模型，openai兼容API，内置Web聊天UI。
+desc=Local 基于llama.cpp和Vulkan GPU加速的本地LLM推理服务器，支持GGUF模型、OpenAI兼容API以及内置Web聊天界面。
 source=thirdparty
 platform=all
 maintainer=ggml-org
